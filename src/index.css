@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-sf-primary: #8174f7;
+  --color-sf-secondary: #6558e8;
+  --color-sf-lavender: #f0edff;
+  --color-sf-bg: #f8f9fd;
+  --color-sf-surface: #ffffff;
+  --color-sf-text: #20243a;
+  --color-sf-muted: #858ba3;
+  --color-sf-border: #eceef5;
+  --color-sf-success: #36b37e;
+  --color-sf-warning: #f5ae48;
+  --color-sf-danger: #ef6472;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: #f8f9fd;
+    color: #20243a;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

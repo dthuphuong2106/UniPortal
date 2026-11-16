@@ -1,0 +1,6 @@
+{
+  "name": "UniPortal — Cổng thông tin và quản lý học tập sinh viên",
+  "description": "Cổng thông tin và quản lý học tập sinh viên toàn khóa học: theo dõi lịch sử học tập đa học kỳ, tính điểm GPA tích lũy, lập kế hoạch mục tiêu và cảnh báo học vụ.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
