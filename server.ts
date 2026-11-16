@@ -2791,7 +2791,7 @@ app.put(
 // --- VITE DEV / PRODUCTION STATIC SERVER ---
 
 async function startServer(): Promise<void> {
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {
