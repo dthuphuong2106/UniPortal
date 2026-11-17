@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -9,9 +9,11 @@ import {
   Clock,
   Compass,
   GraduationCap,
+  QrCode,
   Sparkles,
   Target,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -26,6 +28,7 @@ import {
   buildTargetGpaScenarios,
   calculateTargetGpaPlan,
   formatGpa,
+  formatVnd,
   translateSeverity,
   validatePlannedCredits,
 } from '../../shared/academicLogic.ts';
@@ -48,14 +51,40 @@ function classificationTone(color: string): SemanticTone {
 export function StudentDashboardPage({
   overview,
   onNavigate,
+  onToast,
 }: {
   overview: StudentOverviewResponse;
   onNavigate: (route: ActiveRouteKey) => void;
+  onToast?: (message: string, tone?: 'success' | 'error' | 'info' | 'warning') => void;
 }) {
-  const { student, summary, warnings, academicTerms, settings } = overview;
+  const { student, summary, warnings, academicTerms, settings, tuitionSummary } = overview;
   const activeWarnings = warnings.filter((w) => w.warning_status !== 'Resolved');
   const firstName = student.full_name.trim().split(' ').slice(-1)[0] || student.full_name;
   const [yearFilter, setYearFilter] = useState<string>('ALL');
+  const [debtBannerDismissed, setDebtBannerDismissed] = useState(false);
+  const notifiedDebtKeyRef = useRef<string | null>(null);
+
+  const isDebtOverThreshold = Boolean(
+    tuitionSummary &&
+      tuitionSummary.totalUnpaid > tuitionSummary.debtAlertThreshold &&
+      tuitionSummary.totalUnpaid > 0
+  );
+
+  useEffect(() => {
+    if (!tuitionSummary || !isDebtOverThreshold || !onToast) return;
+    const key = `${student.student_id}:${tuitionSummary.totalUnpaid}:${tuitionSummary.debtAlertThreshold}`;
+    if (notifiedDebtKeyRef.current === key) return;
+    notifiedDebtKeyRef.current = key;
+    onToast(
+      `Cảnh báo công nợ học phí: Dư nợ ${formatVnd(tuitionSummary.totalUnpaid)} đã vượt ngưỡng ${formatVnd(tuitionSummary.debtAlertThreshold)}. Vui lòng thanh toán QR.`,
+      'warning'
+    );
+  }, [
+    isDebtOverThreshold,
+    onToast,
+    student.student_id,
+    tuitionSummary,
+  ]);
 
   const currentCgpaNum = summary.cgpa ?? 0;
   const currentCreditsNum = summary.gpaEligibleCredits;
@@ -272,6 +301,55 @@ export function StudentDashboardPage({
           </button>
         </div>
       </div>
+
+      {/* Cảnh báo công nợ học phí vượt ngưỡng */}
+      {isDebtOverThreshold && tuitionSummary && !debtBannerDismissed && (
+        <div
+          role="alert"
+          className="rounded-[18px] border border-[#F5AE48]/45 bg-[#FFF8EC] p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+        >
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-[#F5AE48]/20 text-[#9A5F0D] flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-[#7A4A06]">
+                Cảnh báo công nợ học phí vượt ngưỡng cho phép
+              </div>
+              <p className="text-xs text-[#7A4A06]/90 mt-1 leading-relaxed">
+                Số dư công nợ hiện tại là{' '}
+                <span className="font-mono font-bold tabular-nums text-[#C83D4C]">
+                  {formatVnd(tuitionSummary.totalUnpaid)}
+                </span>{' '}
+                ({tuitionSummary.unpaidCount} học kỳ chưa thanh toán), vượt ngưỡng cảnh báo{' '}
+                <span className="font-mono font-semibold tabular-nums">
+                  {formatVnd(tuitionSummary.debtAlertThreshold)}
+                </span>
+                . Vui lòng hoàn tất thanh toán để đảm bảo tiến độ đăng ký học phần và xét điểm.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+            <button
+              type="button"
+              onClick={() => onNavigate('student_tuition')}
+              className="px-4 py-2 text-xs font-semibold text-white bg-[#6558E8] hover:bg-[#5246D4] rounded-xl inline-flex items-center gap-1.5 transition-colors"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Thanh toán QR ngay</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDebtBannerDismissed(true)}
+              className="p-2 text-[#9A5F0D] hover:bg-[#F5AE48]/20 rounded-xl transition-colors"
+              aria-label="Đóng cảnh báo học phí"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Đúng 4 thẻ KPI */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">

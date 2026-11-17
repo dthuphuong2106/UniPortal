@@ -365,6 +365,7 @@ app.get('/api/students/:studentId/overview', requireAuth, (req: AuthenticatedReq
     .all(studentId);
 
   const { reports, unreadReportsCount } = getStudentReports(studentId);
+  const tuitionOverview = getStudentTuitionOverview(studentId);
 
   res.json({
     student,
@@ -376,6 +377,7 @@ app.get('/api/students/:studentId/overview', requireAuth, (req: AuthenticatedReq
     activities,
     settings,
     academicTerms: getAcademicTerms(),
+    tuitionSummary: tuitionOverview.summary,
   });
 });
 
@@ -3047,6 +3049,17 @@ app.put(
       return;
     }
 
+    const nextDebtThreshold =
+      body.debtAlertThreshold !== undefined
+        ? Number(body.debtAlertThreshold)
+        : current.debtAlertThreshold;
+    if (!Number.isInteger(nextDebtThreshold) || nextDebtThreshold < 0 || nextDebtThreshold > 500_000_000) {
+      res.status(400).json({
+        error: 'Ngưỡng cảnh báo công nợ phải là số nguyên không âm hợp lệ (tối đa 500.000.000 đ).',
+      });
+      return;
+    }
+
     const nextBankName = (body.bankName ?? current.bankName).trim();
     const nextAccountNumber = (body.accountNumber ?? current.accountNumber).trim();
     const nextAccountHolder = (body.accountHolder ?? current.accountHolder).trim();
@@ -3090,6 +3103,7 @@ app.put(
     const now = new Date().toISOString();
     const updatedConfig: TuitionConfig = {
       pricePerCredit: nextPrice,
+      debtAlertThreshold: nextDebtThreshold,
       bankName: nextBankName,
       accountNumber: nextAccountNumber,
       accountHolder: nextAccountHolder,

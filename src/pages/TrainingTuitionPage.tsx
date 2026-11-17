@@ -31,6 +31,7 @@ export function TrainingTuitionPage({
 
   // Config form state
   const [pricePerCredit, setPricePerCredit] = useState('850000');
+  const [debtAlertThreshold, setDebtAlertThreshold] = useState('5000000');
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountHolder, setAccountHolder] = useState('');
@@ -46,6 +47,7 @@ export function TrainingTuitionPage({
 
   const syncFormFromConfig = (overview: TrainingTuitionOverviewResponse) => {
     setPricePerCredit(String(overview.config.pricePerCredit));
+    setDebtAlertThreshold(String(overview.config.debtAlertThreshold ?? 5000000));
     setBankName(overview.config.bankName);
     setAccountNumber(overview.config.accountNumber);
     setAccountHolder(overview.config.accountHolder);
@@ -106,6 +108,11 @@ export function TrainingTuitionPage({
       setConfigError('Đơn giá tín chỉ phải là số nguyên từ 1.000 đ đến 50.000.000 đ.');
       return;
     }
+    const parsedThreshold = Number(debtAlertThreshold);
+    if (!Number.isInteger(parsedThreshold) || parsedThreshold < 0 || parsedThreshold > 500_000_000) {
+      setConfigError('Ngưỡng cảnh báo công nợ phải là số nguyên không âm (tối đa 500.000.000 đ).');
+      return;
+    }
     if (!bankName.trim() || !accountNumber.trim() || !accountHolder.trim() || !transferNotePrefix.trim()) {
       setConfigError('Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng và tiền tố nội dung.');
       return;
@@ -115,6 +122,7 @@ export function TrainingTuitionPage({
     try {
       const res = await api.updateTuitionConfig({
         pricePerCredit: parsedPrice,
+        debtAlertThreshold: parsedThreshold,
         bankName: bankName.trim(),
         accountNumber: accountNumber.trim(),
         accountHolder: accountHolder.trim(),
@@ -268,7 +276,7 @@ export function TrainingTuitionPage({
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-[#20243A] mb-1.5">
                 Đơn giá / 1 tín chỉ (VNĐ)
@@ -279,6 +287,20 @@ export function TrainingTuitionPage({
                 step="1000"
                 value={pricePerCredit}
                 onChange={(e) => setPricePerCredit(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#20243A] mb-1.5">
+                Ngưỡng cảnh báo công nợ (VNĐ)
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="100000"
+                value={debtAlertThreshold}
+                onChange={(e) => setDebtAlertThreshold(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
               />
             </div>

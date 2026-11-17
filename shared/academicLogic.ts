@@ -1354,6 +1354,7 @@ export function evaluateStudentWarnings(
 
 export interface TuitionConfig {
   pricePerCredit: number;
+  debtAlertThreshold: number;
   bankName: string;
   accountNumber: string;
   accountHolder: string;
@@ -1364,6 +1365,7 @@ export interface TuitionConfig {
 
 export const DEFAULT_TUITION_CONFIG: TuitionConfig = {
   pricePerCredit: 850000,
+  debtAlertThreshold: 5000000,
   bankName: 'Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)',
   accountNumber: '1029384756',
   accountHolder: 'TRƯỜNG ĐẠI HỌC UNIPORTAL',

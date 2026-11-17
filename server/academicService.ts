@@ -562,6 +562,10 @@ export function getTuitionConfig(): TuitionConfig {
         Number.isInteger(parsed.pricePerCredit) && (parsed.pricePerCredit ?? 0) > 0
           ? Number(parsed.pricePerCredit)
           : DEFAULT_TUITION_CONFIG.pricePerCredit,
+      debtAlertThreshold:
+        Number.isInteger(parsed.debtAlertThreshold) && (parsed.debtAlertThreshold ?? -1) >= 0
+          ? Number(parsed.debtAlertThreshold)
+          : DEFAULT_TUITION_CONFIG.debtAlertThreshold,
       bankName: parsed.bankName?.trim() || DEFAULT_TUITION_CONFIG.bankName,
       accountNumber: parsed.accountNumber?.trim() || DEFAULT_TUITION_CONFIG.accountNumber,
       accountHolder: parsed.accountHolder?.trim() || DEFAULT_TUITION_CONFIG.accountHolder,
@@ -589,6 +593,8 @@ export function getStudentTuitionOverview(studentId: string): {
     paidCount: number;
     unpaidCount: number;
     totalBillableCredits: number;
+    debtAlertThreshold: number;
+    isDebtOverThreshold: boolean;
   };
 } {
   const config = getTuitionConfig();
@@ -612,6 +618,8 @@ export function getStudentTuitionOverview(studentId: string): {
   const paidCount = invoices.filter((inv) => inv.status === 'PAID').length;
   const unpaidCount = invoices.filter((inv) => inv.status === 'UNPAID').length;
   const totalBillableCredits = invoices.reduce((sum, inv) => sum + inv.totalCredits, 0);
+  const debtAlertThreshold = config.debtAlertThreshold;
+  const isDebtOverThreshold = totalUnpaid > debtAlertThreshold;
 
   return {
     config,
@@ -624,6 +632,8 @@ export function getStudentTuitionOverview(studentId: string): {
       paidCount,
       unpaidCount,
       totalBillableCredits,
+      debtAlertThreshold,
+      isDebtOverThreshold,
     },
   };
 }

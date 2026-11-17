@@ -46,6 +46,7 @@ export interface StudentOverviewResponse {
   activities: AcademicActivityRecord[];
   settings: AcademicSettingsBundle;
   academicTerms: AcademicTermsBundle;
+  tuitionSummary?: StudentTuitionOverviewResponse['summary'];
 }
 
 export interface MarkReportReadResponse {
@@ -177,6 +178,8 @@ export interface StudentTuitionOverviewResponse {
     paidCount: number;
     unpaidCount: number;
     totalBillableCredits: number;
+    debtAlertThreshold: number;
+    isDebtOverThreshold: boolean;
   };
 }
 

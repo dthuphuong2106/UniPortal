@@ -14,8 +14,19 @@ import {
   QrCode,
   Receipt,
   Trash2,
+  TrendingUp,
   Upload,
 } from 'lucide-react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import {
   formatVnd,
   StudentTuitionInvoice,
@@ -194,6 +205,31 @@ export function TuitionPaymentPage({
     [orderedInvoices, selectedInvoiceKey]
   );
 
+  const debtTrendData = useMemo(() => {
+    if (!tuitionData) return [];
+    let cumulativeBilled = 0;
+    let cumulativePaid = 0;
+    return tuitionData.invoices.map((inv) => {
+      cumulativeBilled += inv.totalAmount;
+      if (inv.status === 'PAID') {
+        cumulativePaid += inv.totalAmount;
+      }
+      const outstandingBalance = Math.max(0, cumulativeBilled - cumulativePaid);
+      const shortSem = inv.semester
+        .replace('Học kỳ ', 'HK')
+        .replace('hè', 'Hè');
+      const shortYear = `${inv.academic_year.slice(2, 4)}-${inv.academic_year.slice(7, 9)}`;
+      return {
+        name: `${shortSem} (${shortYear})`,
+        fullLabel: `${inv.semester} (${inv.academic_year})`,
+        termFee: inv.totalAmount,
+        cumulativePaid,
+        outstandingBalance,
+        statusLabel: inv.status === 'PAID' ? 'Đã thanh toán' : 'Chưa thanh toán',
+      };
+    });
+  }, [tuitionData]);
+
   const activeQrImage = customTestQr || tuitionData?.config.qrImageDataUrl || null;
   const qrSourceLabel = customTestQr
     ? 'Ảnh QR quét thử bạn vừa tải lên'
@@ -369,6 +405,137 @@ export function TuitionPaymentPage({
             Áp dụng theo quy định Phòng Đào tạo
           </div>
         </div>
+      </div>
+
+      {/* Tuition Debt & Payment Trend Line Chart */}
+      <div className="bg-white border border-[#ECEEF5] rounded-[18px] p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#F0EDFF] text-[#6558E8] flex items-center justify-center shrink-0 mt-0.5">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-[#20243A]">
+                Biến động công nợ học phí theo thời gian
+              </h2>
+              <p className="text-xs text-[#858BA3] mt-0.5">
+                Theo dõi dư nợ còn lại, tiến độ thanh toán lũy kế và học phí phát sinh qua từng học kỳ.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 text-xs text-[#555C75]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#C83D4C]" />
+              <span>Công nợ còn lại</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#238A5E]" />
+              <span>Đã thanh toán lũy kế</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#8174F7]" />
+              <span>Học phí từng kỳ</span>
+            </span>
+          </div>
+        </div>
+
+        {debtTrendData.length === 0 ? (
+          <div className="h-60 flex items-center justify-center text-sm text-[#858BA3] border border-dashed border-[#ECEEF5] rounded-2xl">
+            Chưa có dữ liệu hóa đơn học phí để hiển thị biểu đồ biến động.
+          </div>
+        ) : (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={debtTrendData} margin={{ top: 12, right: 20, left: 4, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ECEEF5" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: '#858BA3' }}
+                  axisLine={{ stroke: '#ECEEF5' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(val: number) =>
+                    val === 0
+                      ? '0'
+                      : val >= 1_000_000
+                        ? `${(val / 1_000_000).toFixed(val % 1_000_000 === 0 ? 0 : 1)} tr`
+                        : `${Math.round(val / 1000)}k`
+                  }
+                  tick={{ fontSize: 11, fill: '#858BA3' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={56}
+                />
+                <Tooltip
+                  formatter={(value, name) => {
+                    const numeric = typeof value === 'number' ? value : Number(value ?? 0);
+                    const label =
+                      name === 'outstandingBalance'
+                        ? 'Công nợ còn lại'
+                        : name === 'cumulativePaid'
+                          ? 'Đã thanh toán lũy kế'
+                          : 'Học phí kỳ';
+                    return [formatVnd(numeric), label];
+                  }}
+                  labelFormatter={(_, payload) => {
+                    const row = payload?.[0]?.payload as
+                      | { fullLabel?: string; statusLabel?: string }
+                      | undefined;
+                    return row ? `${row.fullLabel} · ${row.statusLabel}` : '';
+                  }}
+                  contentStyle={{
+                    borderRadius: '12px',
+                    border: '1px solid #ECEEF5',
+                    boxShadow: '0 8px 24px rgba(32, 36, 58, 0.06)',
+                    fontSize: '12px',
+                  }}
+                />
+                {config.debtAlertThreshold > 0 && (
+                  <ReferenceLine
+                    y={config.debtAlertThreshold}
+                    stroke="#F5AE48"
+                    strokeDasharray="4 4"
+                    label={{
+                      value: `Ngưỡng cảnh báo (${formatVnd(config.debtAlertThreshold)})`,
+                      position: 'insideTopRight',
+                      fill: '#B77416',
+                      fontSize: 11,
+                    }}
+                  />
+                )}
+                <Line
+                  type="monotone"
+                  dataKey="outstandingBalance"
+                  name="outstandingBalance"
+                  stroke="#C83D4C"
+                  strokeWidth={3}
+                  dot={{ r: 4.5, fill: '#C83D4C', strokeWidth: 2, stroke: '#FFFFFF' }}
+                  activeDot={{ r: 6.5, fill: '#C83D4C' }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="cumulativePaid"
+                  name="cumulativePaid"
+                  stroke="#238A5E"
+                  strokeWidth={2.5}
+                  dot={{ r: 4, fill: '#238A5E', strokeWidth: 2, stroke: '#FFFFFF' }}
+                  activeDot={{ r: 6, fill: '#238A5E' }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="termFee"
+                  name="termFee"
+                  stroke="#8174F7"
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  dot={{ r: 3.5, fill: '#8174F7' }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
       {/* Main Workspace: Semester Invoices (Left) + Real QR Payment Panel (Right) */}

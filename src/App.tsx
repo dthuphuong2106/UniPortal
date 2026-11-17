@@ -310,21 +310,22 @@ function PortalWorkspace() {
   const [selectedApprovalSectionId, setSelectedApprovalSectionId] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(
-    null
-  );
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: 'success' | 'error' | 'info' | 'warning';
+  } | null>(null);
   const loadSeqRef = useRef(0);
   const toastTimerRef = useRef<number | null>(null);
 
   const showToast = useCallback(
-    (message: string, tone: 'success' | 'error' | 'info' = 'success') => {
+    (message: string, tone: 'success' | 'error' | 'info' | 'warning' = 'success') => {
       setToast({ message, tone });
       if (toastTimerRef.current) {
         window.clearTimeout(toastTimerRef.current);
       }
       toastTimerRef.current = window.setTimeout(() => {
         setToast(null);
-      }, 4500);
+      }, 5000);
     },
     []
   );
@@ -521,7 +522,11 @@ function PortalWorkspace() {
           ) : (
             <>
               {effectiveRoute === 'student_dashboard' && (
-                <StudentDashboardPage overview={studentOverview} onNavigate={setRoute} />
+                <StudentDashboardPage
+                  overview={studentOverview}
+                  onNavigate={setRoute}
+                  onToast={showToast}
+                />
               )}
               {effectiveRoute === 'student_results' && (
                 <MyCoursesPage
