@@ -45,25 +45,6 @@ export function AdminGradeConfigView({
       setError('Tổng trọng số điểm thành phần phải đúng bằng 100%.');
       return;
     }
-    for (const entry of scale) {
-      if (
-        !entry.letter.trim() ||
-        !Number.isFinite(entry.point) ||
-        entry.point < 0 ||
-        entry.point > 4 ||
-        !Number.isFinite(entry.minNumeric) ||
-        entry.minNumeric < 0 ||
-        entry.minNumeric > 10 ||
-        !Number.isFinite(entry.maxNumeric) ||
-        entry.maxNumeric < entry.minNumeric ||
-        entry.maxNumeric > 10
-      ) {
-        setError(
-          `Mức điểm "${entry.letter || '?'}" không hợp lệ: Hệ 4 phải từ 0.0–4.0 và thang 10 phải từ 0.00–10.00 (Tối thiểu ≤ Tối đa).`
-        );
-        return;
-      }
-    }
     setSaving(true);
     try {
       await api.updateSetting('grading_scale', scale);
@@ -101,10 +82,10 @@ export function AdminGradeConfigView({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-[#20243A]">
-                Cấu hình thang điểm hệ 10 &amp; hệ 4.0
+                Cấu hình thang điểm hệ 4.0
               </h2>
               <p className="text-xs text-[#858BA3] mt-0.5">
-                Điều chỉnh điểm chữ (A+, A, B+, B, C+, C, D+, D, F), điểm hệ 4 (0–4) và ngưỡng thang 10 (0.00–10.00)
+                Điều chỉnh điểm chữ, điểm quy đổi hệ 4, ngưỡng phần trăm và trạng thái đạt
               </p>
             </div>
             <button
@@ -128,8 +109,7 @@ export function AdminGradeConfigView({
                 <tr className="bg-[#F8F9FD] border-b border-[#ECEEF5] text-xs font-semibold text-[#858BA3]">
                   <th className="py-2.5 px-3">Điểm chữ</th>
                   <th className="py-2.5 px-3">Hệ 4 (0–4)</th>
-                  <th className="py-2.5 px-3">Tối thiểu (Hệ 10)</th>
-                  <th className="py-2.5 px-3">Tối đa (Hệ 10)</th>
+                  <th className="py-2.5 px-3">Tối thiểu (%)</th>
                   <th className="py-2.5 px-3">Đạt</th>
                   <th className="py-2.5 px-3 text-right">Xóa</th>
                 </tr>
@@ -169,31 +149,14 @@ export function AdminGradeConfigView({
                     <td className="py-2.5 px-3">
                       <input
                         type="number"
-                        step="0.01"
+                        step="1"
                         min="0"
-                        max="10"
+                        max="100"
                         value={row.minNumeric}
                         onChange={(e) =>
                           setScale((prev) =>
                             prev.map((x, i) =>
                               i === idx ? { ...x, minNumeric: Number(e.target.value) } : x
-                            )
-                          )
-                        }
-                        className="w-20 px-2.5 py-1 font-mono border border-[#ECEEF5] rounded-lg"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max="10"
-                        value={row.maxNumeric}
-                        onChange={(e) =>
-                          setScale((prev) =>
-                            prev.map((x, i) =>
-                              i === idx ? { ...x, maxNumeric: Number(e.target.value) } : x
                             )
                           )
                         }
@@ -709,7 +672,7 @@ export function AdminStudentReportInspector({ data }: { data: AdminOverviewRespo
       {loading || !studentOverview ? (
         <PageLoadingSkeleton />
       ) : (
-        <AcademicReportsPage overview={studentOverview} readOnly={true} />
+        <AcademicReportsPage overview={studentOverview} />
       )}
     </div>
   );

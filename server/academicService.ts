@@ -1,8 +1,6 @@
 import crypto from 'crypto';
 import { db } from './db.ts';
 import {
-  AcademicReportRecord,
-  AcademicReportType,
   AcademicSettingsBundle,
   AcademicWarningRecord,
   AcademicYearRecord,
@@ -15,7 +13,6 @@ import {
   DEFAULT_CLASSIFICATION_BANDS,
   DEFAULT_GPA_POLICY,
   DEFAULT_GRADING_SCALE,
-  DEFAULT_TUITION_CONFIG,
   DEFAULT_WARNING_THRESHOLDS,
   EnrollmentRecord,
   evaluateStudentWarnings,
@@ -28,14 +25,7 @@ import {
   SemesterRecord,
   StudentAcademicSummary,
   StudentProfile,
-  StudentTuitionInvoice,
-  TuitionConfig,
-  TuitionDueSummary,
-  TuitionPaymentRecord,
   WarningThresholds,
-  buildStudentTuitionInvoices,
-  computeTuitionDueSummary,
-  isValidIsoDateYmd,
 } from '../shared/academicLogic.ts';
 
 export function getAcademicTerms(): {
@@ -70,14 +60,8 @@ export function getAcademicSettings(): AcademicSettingsBundle {
     }
   };
 
-  const rawScale = parseJson<GradeScaleEntry[]>('grading_scale', DEFAULT_GRADING_SCALE);
-  const hasLegacyScale =
-    !Array.isArray(rawScale) ||
-    rawScale.length === 0 ||
-    rawScale.some((item) => Number(item.maxNumeric ?? 0) > 10 || item.letter === 'A-' || item.letter === 'B-');
-
   return {
-    gradingScale: hasLegacyScale ? DEFAULT_GRADING_SCALE : rawScale,
+    gradingScale: parseJson<GradeScaleEntry[]>('grading_scale', DEFAULT_GRADING_SCALE),
     classificationBands: parseJson<ClassificationBand[]>('classification_bands', DEFAULT_CLASSIFICATION_BANDS),
     warningThresholds: parseJson<WarningThresholds>('warning_thresholds', DEFAULT_WARNING_THRESHOLDS),
     gpaPolicy: parseJson<GpaPolicySettings>('gpa_policy', DEFAULT_GPA_POLICY),
@@ -450,288 +434,3 @@ export function recalculateAllStudents(): void {
     syncStudentDerivedRecords(s.student_id);
   }
 }
-
-export function getStudentReports(studentId: string): {
-  reports: AcademicReportRecord[];
-  unreadReportsCount: number;
-} {
-  const rows = db
-    .prepare(
-      `SELECT
-         r.report_id,
-         r.student_id,
-         r.title,
-         r.report_type,
-         r.semester,
-         r.academic_year,
-         r.summary,
-         r.content,
-         r.created_at,
-         CASE WHEN sr.read_at IS NOT NULL THEN 1 ELSE 0 END as is_read_int,
-         sr.read_at as read_at
-       FROM academic_reports r
-       LEFT JOIN student_report_reads sr
-         ON sr.report_id = r.report_id AND sr.student_id = ?
-       WHERE r.student_id IS NULL OR r.student_id = ?
-       ORDER BY (sr.read_at IS NOT NULL) ASC, r.created_at DESC`
-    )
-    .all(studentId, studentId) as Array<{
-    report_id: string;
-    student_id: string | null;
-    title: string;
-    report_type: AcademicReportType;
-    semester: string;
-    academic_year: string;
-    summary: string;
-    content: string;
-    created_at: string;
-    is_read_int: number;
-    read_at: string | null;
-  }>;
-
-  const reports: AcademicReportRecord[] = rows.map((row) => ({
-    report_id: row.report_id,
-    student_id: row.student_id,
-    title: row.title,
-    report_type: row.report_type,
-    semester: row.semester,
-    academic_year: row.academic_year,
-    summary: row.summary,
-    content: row.content,
-    created_at: row.created_at,
-    is_read: row.is_read_int === 1,
-    read_at: row.read_at ?? null,
-  }));
-
-  const unreadReportsCount = reports.filter((r) => !r.is_read).length;
-  return { reports, unreadReportsCount };
-}
-
-export function markStudentReportRead(
-  studentId: string,
-  reportId: string,
-  actorUserId?: string
-): { report: AcademicReportRecord; unreadReportsCount: number } | null {
-  const targetReport = db
-    .prepare(
-      `SELECT report_id, student_id, title
-       FROM academic_reports
-       WHERE report_id = ? AND (student_id IS NULL OR student_id = ?)`
-    )
-    .get(reportId, studentId) as { report_id: string; student_id: string | null; title: string } | undefined;
-
-  if (!targetReport) {
-    return null;
-  }
-
-  const now = new Date().toISOString();
-  const result = db
-    .prepare(
-      `INSERT OR IGNORE INTO student_report_reads (read_id, student_id, report_id, read_at)
-       VALUES (?, ?, ?, ?)`
-    )
-    .run(`RDR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, studentId, reportId, now);
-
-  if (result.changes > 0 && actorUserId) {
-    logAcademicActivity(
-      studentId,
-      actorUserId,
-      'ĐÃ ĐỌC BÁO CÁO',
-      `Đã xác nhận đọc báo cáo học vụ: ${targetReport.title}.`
-    );
-  }
-
-  const { reports, unreadReportsCount } = getStudentReports(studentId);
-  const updated = reports.find((r) => r.report_id === reportId);
-  if (!updated) return null;
-  return { report: updated, unreadReportsCount };
-}
-
-// --- TUITION & QR PAYMENT SERVICE ---
-
-export function getTuitionConfig(): TuitionConfig {
-  const row = db
-    .prepare("SELECT setting_value, updated_at FROM academic_settings WHERE setting_name = 'tuition_config'")
-    .get() as { setting_value: string; updated_at: string } | undefined;
-
-  if (!row) {
-    return { ...DEFAULT_TUITION_CONFIG };
-  }
-
-  try {
-    const parsed = JSON.parse(row.setting_value) as Partial<TuitionConfig>;
-    return {
-      pricePerCredit:
-        Number.isInteger(parsed.pricePerCredit) && (parsed.pricePerCredit ?? 0) > 0
-          ? Number(parsed.pricePerCredit)
-          : DEFAULT_TUITION_CONFIG.pricePerCredit,
-      debtAlertThreshold:
-        Number.isInteger(parsed.debtAlertThreshold) && (parsed.debtAlertThreshold ?? -1) >= 0
-          ? Number(parsed.debtAlertThreshold)
-          : DEFAULT_TUITION_CONFIG.debtAlertThreshold,
-      paymentDueDate: isValidIsoDateYmd(parsed.paymentDueDate)
-        ? parsed.paymentDueDate
-        : DEFAULT_TUITION_CONFIG.paymentDueDate,
-      dueReminderDays:
-        Number.isInteger(parsed.dueReminderDays) &&
-        (parsed.dueReminderDays ?? 0) >= 1 &&
-        (parsed.dueReminderDays ?? 0) <= 180
-          ? Number(parsed.dueReminderDays)
-          : DEFAULT_TUITION_CONFIG.dueReminderDays,
-      bankName: parsed.bankName?.trim() || DEFAULT_TUITION_CONFIG.bankName,
-      accountNumber: parsed.accountNumber?.trim() || DEFAULT_TUITION_CONFIG.accountNumber,
-      accountHolder: parsed.accountHolder?.trim() || DEFAULT_TUITION_CONFIG.accountHolder,
-      transferNotePrefix:
-        parsed.transferNotePrefix?.trim() || DEFAULT_TUITION_CONFIG.transferNotePrefix,
-      qrImageDataUrl:
-        typeof parsed.qrImageDataUrl === 'string' &&
-        (parsed.qrImageDataUrl.startsWith('data:image/') ||
-          parsed.qrImageDataUrl.startsWith('/assets/'))
-          ? parsed.qrImageDataUrl
-          : DEFAULT_TUITION_CONFIG.qrImageDataUrl,
-      updatedAt: parsed.updatedAt || row.updated_at,
-    };
-  } catch {
-    return { ...DEFAULT_TUITION_CONFIG };
-  }
-}
-
-export function getStudentTuitionOverview(studentId: string): {
-  config: TuitionConfig;
-  invoices: StudentTuitionInvoice[];
-  payments: TuitionPaymentRecord[];
-  summary: {
-    totalBilled: number;
-    totalPaid: number;
-    totalUnpaid: number;
-    paidCount: number;
-    unpaidCount: number;
-    totalBillableCredits: number;
-    debtAlertThreshold: number;
-    isDebtOverThreshold: boolean;
-    paymentDueDate: string;
-    dueReminderDays: number;
-    nextUnpaidDue: TuitionDueSummary | null;
-  };
-} {
-  const config = getTuitionConfig();
-  const enrollments = getStudentEnrollments(studentId);
-  const payments = db
-    .prepare(
-      `SELECT p.*, s.full_name as student_name, s.major as student_major
-       FROM tuition_payments p
-       JOIN students s ON p.student_id = s.student_id
-       WHERE p.student_id = ?
-       ORDER BY p.paid_at DESC`
-    )
-    .all(studentId) as TuitionPaymentRecord[];
-
-  const invoices = buildStudentTuitionInvoices(studentId, enrollments, payments, config);
-  const totalBilled = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0);
-  const totalPaid = invoices
-    .filter((inv) => inv.status === 'PAID')
-    .reduce((sum, inv) => sum + inv.totalAmount, 0);
-  const totalUnpaid = Math.max(0, totalBilled - totalPaid);
-  const paidCount = invoices.filter((inv) => inv.status === 'PAID').length;
-  const unpaidCount = invoices.filter((inv) => inv.status === 'UNPAID').length;
-  const totalBillableCredits = invoices.reduce((sum, inv) => sum + inv.totalCredits, 0);
-  const debtAlertThreshold = config.debtAlertThreshold;
-  const isDebtOverThreshold = totalUnpaid > debtAlertThreshold;
-  const nextUnpaidDue = computeTuitionDueSummary(invoices, config);
-
-  return {
-    config,
-    invoices,
-    payments,
-    summary: {
-      totalBilled,
-      totalPaid,
-      totalUnpaid,
-      paidCount,
-      unpaidCount,
-      totalBillableCredits,
-      debtAlertThreshold,
-      isDebtOverThreshold,
-      paymentDueDate: config.paymentDueDate,
-      dueReminderDays: config.dueReminderDays,
-      nextUnpaidDue,
-    },
-  };
-}
-
-export function getTrainingTuitionOverview(): {
-  config: TuitionConfig;
-  payments: TuitionPaymentRecord[];
-  studentSummaries: Array<{
-    student_id: string;
-    full_name: string;
-    major: string;
-    totalCredits: number;
-    totalBilled: number;
-    totalPaid: number;
-    totalUnpaid: number;
-    unpaidSemestersCount: number;
-    latestUnpaidLabel: string | null;
-  }>;
-  totals: {
-    totalBilled: number;
-    totalCollected: number;
-    totalOutstanding: number;
-    collectionRate: number;
-    totalTransactions: number;
-  };
-} {
-  const config = getTuitionConfig();
-  const students = db
-    .prepare('SELECT student_id, full_name, major FROM students ORDER BY student_id ASC')
-    .all() as Array<{ student_id: string; full_name: string; major: string }>;
-
-  const payments = db
-    .prepare(
-      `SELECT p.*, s.full_name as student_name, s.major as student_major
-       FROM tuition_payments p
-       JOIN students s ON p.student_id = s.student_id
-       ORDER BY p.paid_at DESC`
-    )
-    .all() as TuitionPaymentRecord[];
-
-  const studentSummaries = students.map((stu) => {
-    const overview = getStudentTuitionOverview(stu.student_id);
-    const unpaidInvoices = overview.invoices.filter((inv) => inv.status === 'UNPAID');
-    const latestUnpaid = unpaidInvoices[unpaidInvoices.length - 1] ?? null;
-
-    return {
-      student_id: stu.student_id,
-      full_name: stu.full_name,
-      major: stu.major,
-      totalCredits: overview.summary.totalBillableCredits,
-      totalBilled: overview.summary.totalBilled,
-      totalPaid: overview.summary.totalPaid,
-      totalUnpaid: overview.summary.totalUnpaid,
-      unpaidSemestersCount: unpaidInvoices.length,
-      latestUnpaidLabel: latestUnpaid
-        ? `${latestUnpaid.semester} (${latestUnpaid.academic_year})`
-        : null,
-    };
-  });
-
-  const totalBilled = studentSummaries.reduce((sum, s) => sum + s.totalBilled, 0);
-  const totalCollected = studentSummaries.reduce((sum, s) => sum + s.totalPaid, 0);
-  const totalOutstanding = Math.max(0, totalBilled - totalCollected);
-  const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 100;
-
-  return {
-    config,
-    payments,
-    studentSummaries,
-    totals: {
-      totalBilled,
-      totalCollected,
-      totalOutstanding,
-      collectionRate,
-      totalTransactions: payments.length,
-    },
-  };
-}
-
-

@@ -8,10 +8,7 @@ import {
   DEFAULT_CLASSIFICATION_BANDS,
   DEFAULT_GPA_POLICY,
   DEFAULT_GRADING_SCALE,
-  DEFAULT_TUITION_CONFIG,
   DEFAULT_WARNING_THRESHOLDS,
-  buildTuitionTransferNote,
-  resolveLetterFromNumeric,
 } from '../shared/academicLogic.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
@@ -20,56 +17,10 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const DB_PATH = path.join(DATA_DIR, 'academic.db');
+export const db = new Database(DB_PATH);
 
-function removeSqliteSidecars(dbPath: string): void {
-  for (const suffix of ['-wal', '-shm']) {
-    const sidecar = `${dbPath}${suffix}`;
-    if (fs.existsSync(sidecar)) {
-      fs.unlinkSync(sidecar);
-    }
-  }
-}
-
-function removeDatabaseFiles(dbPath: string): void {
-  removeSqliteSidecars(dbPath);
-  if (fs.existsSync(dbPath)) {
-    fs.unlinkSync(dbPath);
-  }
-}
-
-function openHealthyDatabase(dbPath: string): Database.Database {
-  const dbMissingOrEmpty = !fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0;
-  if (dbMissingOrEmpty) {
-    // Prevent SQLite from replaying orphaned WAL/SHM files against an empty DB
-    removeSqliteSidecars(dbPath);
-  }
-
-  let instance: Database.Database | null = null;
-  try {
-    instance = new Database(dbPath);
-    instance.pragma('journal_mode = WAL');
-    const check = instance.pragma('quick_check', { simple: true });
-    if (check !== 'ok') {
-      throw new Error(`SQLite quick_check failed: ${String(check)}`);
-    }
-    instance.pragma('foreign_keys = ON');
-    return instance;
-  } catch (err) {
-    console.warn('[UniPortal DB] Corrupted or orphaned SQLite state detected, rebuilding clean database:', err);
-    try {
-      instance?.close();
-    } catch {
-      // Ignore close error on broken handle
-    }
-    removeDatabaseFiles(dbPath);
-    const fresh = new Database(dbPath);
-    fresh.pragma('journal_mode = WAL');
-    fresh.pragma('foreign_keys = ON');
-    return fresh;
-  }
-}
-
-export const db = openHealthyDatabase(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 export function getJwtSecret(): string {
   if (process.env.JWT_SECRET && process.env.JWT_SECRET !== 'MY_SESSION_SECRET') {
@@ -326,47 +277,6 @@ export function initializeDatabaseSchema(): void {
       FOREIGN KEY (enrollment_id) REFERENCES enrollments(enrollment_id) ON DELETE CASCADE,
       FOREIGN KEY (section_id) REFERENCES class_sections(section_id) ON DELETE SET NULL
     );
-
-    CREATE TABLE IF NOT EXISTS academic_reports (
-      report_id TEXT PRIMARY KEY,
-      student_id TEXT,
-      title TEXT NOT NULL,
-      report_type TEXT NOT NULL CHECK (report_type IN ('SEMESTER_SUMMARY', 'ADVISORY_NOTICE', 'PROGRESS_REVIEW', 'OFFICIAL_TRANSCRIPT')),
-      semester TEXT NOT NULL,
-      academic_year TEXT NOT NULL,
-      summary TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS student_report_reads (
-      read_id TEXT PRIMARY KEY,
-      student_id TEXT NOT NULL,
-      report_id TEXT NOT NULL,
-      read_at TEXT NOT NULL,
-      FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
-      FOREIGN KEY (report_id) REFERENCES academic_reports(report_id) ON DELETE CASCADE,
-      UNIQUE (student_id, report_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS tuition_payments (
-      payment_id TEXT PRIMARY KEY,
-      student_id TEXT NOT NULL,
-      semester TEXT NOT NULL,
-      academic_year TEXT NOT NULL,
-      total_credits INTEGER NOT NULL CHECK (total_credits > 0),
-      unit_price INTEGER NOT NULL CHECK (unit_price > 0),
-      amount INTEGER NOT NULL CHECK (amount > 0),
-      payment_method TEXT NOT NULL DEFAULT 'QR_SCAN',
-      transaction_ref TEXT NOT NULL,
-      transfer_note TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PAID' CHECK (status IN ('PAID', 'PENDING_CONFIRMATION')),
-      paid_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
-      UNIQUE (student_id, semester, academic_year)
-    );
   `);
 
   // Safe migration for users role CHECK constraint (preserves all existing users & password hashes)
@@ -493,8 +403,6 @@ export function initializeDatabaseSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_sections_semester ON class_sections(semester_id);
     CREATE INDEX IF NOT EXISTS idx_submissions_section ON grade_submissions(section_id, status);
     CREATE INDEX IF NOT EXISTS idx_grade_logs_section ON grade_change_logs(section_id, changed_at);
-    CREATE INDEX IF NOT EXISTS idx_academic_reports_student ON academic_reports(student_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_report_reads_student ON student_report_reads(student_id, report_id);
   `);
 }
 
@@ -606,7 +514,7 @@ export function migrateLegacyTermsAndEnsureDemoJourney(): void {
           `INSERT OR IGNORE INTO enrollments (
             enrollment_id, student_id, course_id, semester, academic_year,
             letter_grade, numeric_grade, grade_point, completion_status, is_repeated, updated_at
-          ) VALUES (?, '22000001', 'CRS-MAT101', 'Học kỳ hè', '2024-2025', 'A', 9.2, 4.0, 'Completed', 1, ?)`
+          ) VALUES (?, '22000001', 'CRS-MAT101', 'Học kỳ hè', '2024-2025', 'A', 92, 4.0, 'Completed', 1, ?)`
         ).run('ENR-P-RETAKE-1', now);
       }
 
@@ -617,7 +525,7 @@ export function migrateLegacyTermsAndEnsureDemoJourney(): void {
           `INSERT OR IGNORE INTO enrollments (
             enrollment_id, student_id, course_id, semester, academic_year,
             letter_grade, numeric_grade, grade_point, completion_status, is_repeated, updated_at
-          ) VALUES (?, '22000002', 'CRS-STA201', 'Học kỳ hè', '2024-2025', 'F', 3.6, 0.0, 'Failed', 1, ?)`
+          ) VALUES (?, '22000002', 'CRS-STA201', 'Học kỳ hè', '2024-2025', 'F', 36, 0.0, 'Failed', 1, ?)`
         ).run('ENR-N-RETAKE-1', now);
       }
 
@@ -735,18 +643,18 @@ export function ensureThreeRoleSystemAndDemoAccounts(): void {
     if (!alreadyApplied) {
       // Seed academic records for student@uniportal.demo (22000100) so she has rich multi-semester history
       const demoStudentEnrollments: Array<[string, string, string, string, string | null, number | null, number | null, string, number]> = [
-        ['ENR-D-01', 'CRS-CS101', 'Học kỳ 1', '2023-2024', 'A', 8.7, 4.0, 'Completed', 1],
-        ['ENR-D-02', 'CRS-MAT101', 'Học kỳ 1', '2023-2024', 'B+', 8.2, 3.5, 'Completed', 1],
-        ['ENR-D-03', 'CRS-ENG101', 'Học kỳ 1', '2023-2024', 'A', 9.1, 4.0, 'Completed', 1],
-        ['ENR-D-04', 'CRS-ECO101', 'Học kỳ 1', '2023-2024', 'B', 7.8, 3.0, 'Completed', 1],
-        ['ENR-D-05', 'CRS-CS102', 'Học kỳ 2', '2023-2024', 'B+', 8.4, 3.5, 'Completed', 1],
-        ['ENR-D-06', 'CRS-MAT102', 'Học kỳ 2', '2023-2024', 'B', 7.6, 3.0, 'Completed', 1],
-        ['ENR-D-07', 'CRS-MIS201', 'Học kỳ 2', '2023-2024', 'A', 8.6, 4.0, 'Completed', 1],
-        ['ENR-D-08', 'CRS-STA201', 'Học kỳ 2', '2023-2024', 'B+', 8.1, 3.5, 'Completed', 1],
-        ['ENR-D-09', 'CRS-CS201', 'Học kỳ 1', '2024-2025', 'A', 9.2, 4.0, 'Completed', 1],
-        ['ENR-D-10', 'CRS-CS202', 'Học kỳ 1', '2024-2025', 'B+', 8.3, 3.5, 'Completed', 1],
-        ['ENR-D-11', 'CRS-CS203', 'Học kỳ 1', '2024-2025', 'A', 8.8, 4.0, 'Completed', 1],
-        ['ENR-D-12', 'CRS-SE201', 'Học kỳ 1', '2024-2025', 'B+', 8.0, 3.5, 'Completed', 1],
+        ['ENR-D-01', 'CRS-CS101', 'Học kỳ 1', '2023-2024', 'A-', 87, 3.7, 'Completed', 1],
+        ['ENR-D-02', 'CRS-MAT101', 'Học kỳ 1', '2023-2024', 'B+', 82, 3.5, 'Completed', 1],
+        ['ENR-D-03', 'CRS-ENG101', 'Học kỳ 1', '2023-2024', 'A', 91, 4.0, 'Completed', 1],
+        ['ENR-D-04', 'CRS-ECO101', 'Học kỳ 1', '2023-2024', 'B', 78, 3.0, 'Completed', 1],
+        ['ENR-D-05', 'CRS-CS102', 'Học kỳ 2', '2023-2024', 'B+', 84, 3.5, 'Completed', 1],
+        ['ENR-D-06', 'CRS-MAT102', 'Học kỳ 2', '2023-2024', 'B', 76, 3.0, 'Completed', 1],
+        ['ENR-D-07', 'CRS-MIS201', 'Học kỳ 2', '2023-2024', 'A-', 86, 3.7, 'Completed', 1],
+        ['ENR-D-08', 'CRS-STA201', 'Học kỳ 2', '2023-2024', 'B+', 81, 3.5, 'Completed', 1],
+        ['ENR-D-09', 'CRS-CS201', 'Học kỳ 1', '2024-2025', 'A', 92, 4.0, 'Completed', 1],
+        ['ENR-D-10', 'CRS-CS202', 'Học kỳ 1', '2024-2025', 'B+', 83, 3.5, 'Completed', 1],
+        ['ENR-D-11', 'CRS-CS203', 'Học kỳ 1', '2024-2025', 'A-', 88, 3.7, 'Completed', 1],
+        ['ENR-D-12', 'CRS-SE201', 'Học kỳ 1', '2024-2025', 'B+', 80, 3.5, 'Completed', 1],
       ];
 
       const insEnr = db.prepare(
@@ -866,7 +774,7 @@ export function ensureThreeRoleSystemAndDemoAccounts(): void {
       // Link existing ENR-P-26 (Student 22000001) & ENR-N-19 (Student 22000002) to active sections
       db.prepare("UPDATE enrollments SET section_id = 'SEC-MIS401-01', is_official = 0 WHERE enrollment_id = 'ENR-P-26'").run();
       db.prepare(
-        "UPDATE enrollments SET section_id = 'SEC-MGT202-01', semester = 'Học kỳ 1', academic_year = '2025-2026', semester_id = ?, attendance_score = 7.5, assignment_score = 7.0, midterm_score = 6.8, final_score = 6.5, numeric_grade = 6.76, letter_grade = 'C+', grade_point = 2.5, completion_status = 'Completed', is_official = 0 WHERE enrollment_id = 'ENR-N-19'"
+        "UPDATE enrollments SET section_id = 'SEC-MGT202-01', semester = 'Học kỳ 1', academic_year = '2025-2026', semester_id = ?, attendance_score = 75, assignment_score = 70, midterm_score = 68, final_score = 65, numeric_grade = 67.6, letter_grade = 'C+', grade_point = 2.5, completion_status = 'Completed', is_official = 0 WHERE enrollment_id = 'ENR-N-19'"
       ).run(sem25_1);
 
       // Enroll Student 22000100 & 23000018 & 22000002 across active sections
@@ -879,25 +787,25 @@ export function ensureThreeRoleSystemAndDemoAccounts(): void {
       );
 
       // SEC-MIS401-01 (IN_PROGRESS, partial draft scores for 22000100, ungraded for 22000001 & 23000018)
-      insSecEnr.run('ENR-SEC1-D1', '22000100', 'CRS-CS401', 'SEC-MIS401-01', sem25_1, 'Học kỳ 1', '2025-2026', 9.2, 8.6, 8.4, null, null, null, null, 'In Progress', 0, now);
-      insSecEnr.run('ENR-SEC1-V1', '23000018', 'CRS-CS401', 'SEC-MIS401-01', sem25_1, 'Học kỳ 1', '2025-2026', 9.5, 9.0, 8.8, null, null, null, null, 'In Progress', 0, now);
+      insSecEnr.run('ENR-SEC1-D1', '22000100', 'CRS-CS401', 'SEC-MIS401-01', sem25_1, 'Học kỳ 1', '2025-2026', 92, 86, 84, null, null, null, null, 'In Progress', 0, now);
+      insSecEnr.run('ENR-SEC1-V1', '23000018', 'CRS-CS401', 'SEC-MIS401-01', sem25_1, 'Học kỳ 1', '2025-2026', 95, 90, 88, null, null, null, null, 'In Progress', 0, now);
 
       // SEC-INT304-01 (NOT_ENTERED)
       insSecEnr.run('ENR-SEC2-D1', '22000100', 'CRS-AI301', 'SEC-INT304-01', sem25_1, 'Học kỳ 1', '2025-2026', null, null, null, null, null, null, null, 'In Progress', 0, now);
       insSecEnr.run('ENR-SEC2-V1', '23000018', 'CRS-AI301', 'SEC-INT304-01', sem25_1, 'Học kỳ 1', '2025-2026', null, null, null, null, null, null, null, 'In Progress', 0, now);
       insSecEnr.run('ENR-SEC2-N1', '22000002', 'CRS-AI301', 'SEC-INT304-01', sem25_1, 'Học kỳ 1', '2025-2026', null, null, null, null, null, null, null, 'In Progress', 0, now);
 
-      // SEC-MGT202-01 (PENDING_APPROVAL — Student 22000100 A 8.64, Student 23000018 A 9.23, Student 22000002 C+ 6.76)
-      insSecEnr.run('ENR-SEC3-D1', '22000100', 'CRS-MGT202', 'SEC-MGT202-01', sem25_1, 'Học kỳ 1', '2025-2026', 9.5, 8.8, 8.5, 8.5, 'A', 8.64, 4.0, 'Completed', 0, now);
-      insSecEnr.run('ENR-SEC3-V1', '23000018', 'CRS-MGT202', 'SEC-MGT202-01', sem25_1, 'Học kỳ 1', '2025-2026', 9.8, 9.2, 9.1, 9.2, 'A', 9.23, 4.0, 'Completed', 0, now);
+      // SEC-MGT202-01 (PENDING_APPROVAL — Student 22000100 A- 86.4, Student 23000018 A 92.3, Student 22000002 C+ 67.6)
+      insSecEnr.run('ENR-SEC3-D1', '22000100', 'CRS-MGT202', 'SEC-MGT202-01', sem25_1, 'Học kỳ 1', '2025-2026', 95, 88, 85, 85, 'A-', 86.4, 3.7, 'Completed', 0, now);
+      insSecEnr.run('ENR-SEC3-V1', '23000018', 'CRS-MGT202', 'SEC-MGT202-01', sem25_1, 'Học kỳ 1', '2025-2026', 98, 92, 91, 92, 'A', 92.3, 4.0, 'Completed', 0, now);
 
       // SEC-INT303-01 (APPROVED in 2024-2025 HK2 — official results)
-      insSecEnr.run('ENR-SEC4-D1', '22000100', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 9.4, 8.8, 8.6, 8.9, 'A', 8.87, 4.0, 'Completed', 1, now);
-      insSecEnr.run('ENR-SEC4-V1', '23000018', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 9.6, 9.4, 9.2, 9.5, 'A', 9.43, 4.0, 'Completed', 1, now);
-      insSecEnr.run('ENR-SEC4-N1', '22000002', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 6.5, 5.0, 4.2, 3.0, 'F', 3.89, 0.0, 'Failed', 1, now);
+      insSecEnr.run('ENR-SEC4-D1', '22000100', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 94, 88, 86, 89, 'A-', 88.7, 3.7, 'Completed', 1, now);
+      insSecEnr.run('ENR-SEC4-V1', '23000018', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 96, 94, 92, 95, 'A', 94.3, 4.0, 'Completed', 1, now);
+      insSecEnr.run('ENR-SEC4-N1', '22000002', 'CRS-CS303', 'SEC-INT303-01', sem24_2, 'Học kỳ 2', '2024-2025', 65, 50, 42, 30, 'F', 38.9, 0.0, 'Failed', 1, now);
 
       // SEC-FIN301-01 (GV002 — IN_PROGRESS)
-      insSecEnr.run('ENR-SEC5-D1', '22000100', 'CRS-FIN301', 'SEC-FIN301-01', sem25_1, 'Học kỳ 1', '2025-2026', 9.0, 8.2, 8.0, null, null, null, null, 'In Progress', 0, now);
+      insSecEnr.run('ENR-SEC5-D1', '22000100', 'CRS-FIN301', 'SEC-FIN301-01', sem25_1, 'Học kỳ 1', '2025-2026', 90, 82, 80, null, null, null, null, 'In Progress', 0, now);
 
       // Seed Grade Submissions & Approvals
       db.prepare(
@@ -924,440 +832,12 @@ export function ensureThreeRoleSystemAndDemoAccounts(): void {
           changed_by_user_id, changed_by_name, changed_by_role,
           previous_numeric_grade, new_numeric_grade, previous_letter_grade, new_letter_grade,
           reason, changed_at
-        ) VALUES ('GCL-INIT-01', 'ENR-SEC3-D1', 'SEC-MGT202-01', '22000100', 'MGT202', ?, 'TS. Nguyễn Minh Quân', 'LECTURER', null, 8.64, null, 'A', 'Nhập điểm tổng kết đợt thi cuối kỳ', ?)`
+        ) VALUES ('GCL-INIT-01', 'ENR-SEC3-D1', 'SEC-MGT202-01', '22000100', 'MGT202', ?, 'TS. Nguyễn Minh Quân', 'LECTURER', null, 86.4, null, 'A-', 'Nhập điểm tổng kết đợt thi cuối kỳ', ?)`
       ).run(lecturerUserId, now);
 
       db.prepare("INSERT INTO schema_migrations (migration_key, applied_at) VALUES ('uniportal_threerole_v1', ?)").run(now);
     }
   })();
-}
-
-export function ensureAcademicReportsSeeded(): void {
-  const reports: Array<{
-    report_id: string;
-    student_id: string | null;
-    title: string;
-    report_type: string;
-    semester: string;
-    academic_year: string;
-    summary: string;
-    content: string;
-    created_at: string;
-  }> = [
-    {
-      report_id: 'RPT-COHORT-2025-HK1',
-      student_id: null,
-      title: 'Tổng kết kết quả học tập Học kỳ 1 năm học 2025–2026',
-      report_type: 'SEMESTER_SUMMARY',
-      semester: 'Học kỳ 1',
-      academic_year: '2025-2026',
-      summary: 'Thông báo tổng hợp điểm chính thức các lớp học phần đã được Phòng Đào tạo phê duyệt trong Học kỳ 1.',
-      content:
-        'Phòng Đào tạo thông báo tiến độ công bố điểm chính thức Học kỳ 1 (2025–2026). Sinh viên cần đối chiếu kết quả quy đổi song song thang điểm 10 và hệ 4 trên cổng UniPortal; mọi thắc mắc phúc khảo gửi trước ngày 15/02/2026.',
-      created_at: '2026-01-20T08:30:00.000Z',
-    },
-    {
-      report_id: 'RPT-COHORT-SCALE10-2025',
-      student_id: null,
-      title: 'Hướng dẫn áp dụng thang điểm 10 – hệ 4 (9 bậc chữ) và kế hoạch GPA',
-      report_type: 'ADVISORY_NOTICE',
-      semester: 'Học kỳ 1',
-      academic_year: '2025-2026',
-      summary: 'Áp dụng thống nhất 9 mức điểm chữ (A+, A, B+, B, C+, C, D+, D, F) quy đổi từ thang điểm 0.00 – 10.00.',
-      content:
-        'Từ năm học 2025–2026, bảng điểm UniPortal hiển thị đồng thời điểm thang 10 và điểm hệ 4 chuẩn 9 bậc (A+ = 4.0 từ 9.5; A = 4.0 từ 8.5; B+ = 3.5; B = 3.0; C+ = 2.5; C = 2.0; D+ = 1.5; D = 1.0; F = 0.0). Sinh viên sử dụng Công cụ Lập kế hoạch GPA Mục tiêu trên Dashboard để xây dựng lộ trình tín chỉ tùy chọn tiếp theo.',
-      created_at: '2026-01-12T09:00:00.000Z',
-    },
-    {
-      report_id: 'RPT-COHORT-PROGRESS-2025',
-      student_id: null,
-      title: 'Báo cáo rà soát tiến độ tín chỉ tốt nghiệp đợt 1 năm 2026',
-      report_type: 'PROGRESS_REVIEW',
-      semester: 'Học kỳ 1',
-      academic_year: '2025-2026',
-      summary: 'Đánh giá tỷ lệ hoàn thành tín chỉ bắt buộc và khuyến nghị đăng ký học cải thiện cho học kỳ kế tiếp.',
-      content:
-        'Sinh viên kiểm tra số tín chỉ đã tích lũy, số tín chỉ còn lại đến mốc tốt nghiệp và danh sách học phần chưa đạt (nếu có) tại mục Tiến độ tốt nghiệp. Các môn học cải thiện sẽ tự động thay thế điểm theo quy chế hiện hành của nhà trường.',
-      created_at: '2026-01-05T10:15:00.000Z',
-    },
-    {
-      report_id: 'RPT-22000100-TRANSCRIPT',
-      student_id: '22000100',
-      title: 'Bảng điểm tích lũy chính thức đến năm thứ 3 · K67 (Phạm Gia Hân)',
-      report_type: 'OFFICIAL_TRANSCRIPT',
-      semester: 'Học kỳ 2',
-      academic_year: '2024-2025',
-      summary: 'Xác nhận hoàn thành 13 học phần chính thức với thành tích nổi bật tại khoa Hệ thống thông tin & Kinh tế số.',
-      content:
-        'Hồ sơ học tập của sinh viên Phạm Gia Hân (22000100) ghi nhận tiến độ ổn định, xếp loại học lực Giỏi – Xuất sắc. Bạn có thể xuất bảng điểm PDF hoặc mô phỏng mục tiêu nâng hạng GPA ngay trên trang Tổng quan học tập.',
-      created_at: '2025-07-01T14:00:00.000Z',
-    },
-    {
-      report_id: 'RPT-22000001-TRANSCRIPT',
-      student_id: '22000001',
-      title: 'Báo cáo rà soát học lực Giỏi & lộ trình tốt nghiệp (Nguyễn Minh Phương)',
-      report_type: 'PROGRESS_REVIEW',
-      semester: 'Học kỳ hè',
-      academic_year: '2024-2025',
-      summary: 'Ghi nhận hoàn thành học cải thiện MAT101 (A · 4.0) và đạt ngưỡng học lực Giỏi.',
-      content:
-        'Sinh viên Nguyễn Minh Phương (22000001) đã hoàn thành học cải thiện Toán cao cấp 1 đạt 9.2/10 (A · 4.0), nâng điểm trung bình tích lũy vượt mốc 3.20. Tiếp tục duy trì tối thiểu 3.60 ở các học kỳ cuối để hướng tới bằng Xuất sắc.',
-      created_at: '2025-08-25T11:20:00.000Z',
-    },
-    {
-      report_id: 'RPT-22000002-ADVISORY',
-      student_id: '22000002',
-      title: 'Thông báo tư vấn học vụ & kế hoạch học lại bắt buộc (Trần Hoàng Nam)',
-      report_type: 'ADVISORY_NOTICE',
-      semester: 'Học kỳ hè',
-      academic_year: '2024-2025',
-      summary: 'Khuyến nghị ưu tiên đăng ký học lại các học phần điểm F để nâng GPA tích lũy trên 2.00.',
-      content:
-        'Phòng Đào tạo và Cố vấn học tập đề nghị sinh viên Trần Hoàng Nam (22000002) sắp xếp lịch gặp cố vấn trước tuần học thứ 2 để lập kế hoạch học lại các môn chưa đạt và sử dụng trình lập kế hoạch GPA mục tiêu kiểm soát khối lượng tín chỉ hợp lý.',
-      created_at: '2025-08-28T09:45:00.000Z',
-    },
-    {
-      report_id: 'RPT-23000018-HONORS',
-      student_id: '23000018',
-      title: 'Ghi nhận thành tích học tập Xuất sắc năm học 2024–2025 (Lê Thảo Vy)',
-      report_type: 'SEMESTER_SUMMARY',
-      semester: 'Học kỳ 2',
-      academic_year: '2024-2025',
-      summary: 'Sinh viên đạt GPA tích lũy thuộc nhóm Xuất sắc toàn khoa Tài chính – Ngân hàng.',
-      content:
-        'Chúc mừng sinh viên Lê Thảo Vy (23000018) duy trì chuỗi kết quả đạt A/A+ ấn tượng trong các học kỳ liên tiếp. Báo cáo này xác nhận hồ sơ đủ điều kiện xét học bổng khuyến khích học tập.',
-      created_at: '2025-07-05T08:00:00.000Z',
-    },
-  ];
-
-  const insReport = db.prepare(
-    `INSERT OR IGNORE INTO academic_reports (
-      report_id, student_id, title, report_type, semester, academic_year, summary, content, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  db.transaction(() => {
-    for (const r of reports) {
-      if (r.student_id) {
-        const stuExists = db
-          .prepare('SELECT 1 FROM students WHERE student_id = ?')
-          .get(r.student_id);
-        if (!stuExists) continue;
-      }
-      insReport.run(
-        r.report_id,
-        r.student_id,
-        r.title,
-        r.report_type,
-        r.semester,
-        r.academic_year,
-        r.summary,
-        r.content,
-        r.created_at
-      );
-    }
-  })();
-}
-
-function ensureTuitionModuleInitialized(): void {
-  const now = new Date().toISOString();
-
-  db.prepare(
-    `INSERT OR IGNORE INTO academic_settings (setting_id, setting_name, setting_value, description, updated_at)
-     VALUES (?, 'tuition_config', ?, ?, ?)`
-  ).run(
-    'SET-TUITION-CONFIG',
-    JSON.stringify({ ...DEFAULT_TUITION_CONFIG, updatedAt: now }),
-    'Đơn giá tín chỉ, thông tin ngân hàng và mã QR thu học phí chính thức của nhà trường',
-    now
-  );
-
-  const alreadyMigrated = db
-    .prepare("SELECT migration_key FROM schema_migrations WHERE migration_key = 'uniportal_tuition_module_v1'")
-    .get();
-  if (alreadyMigrated) {
-    return;
-  }
-
-  db.transaction(() => {
-    const configRow = db
-      .prepare("SELECT setting_value FROM academic_settings WHERE setting_name = 'tuition_config'")
-      .get() as { setting_value: string } | undefined;
-    let pricePerCredit = DEFAULT_TUITION_CONFIG.pricePerCredit;
-    let prefix = DEFAULT_TUITION_CONFIG.transferNotePrefix;
-    if (configRow) {
-      try {
-        const parsed = JSON.parse(configRow.setting_value) as {
-          pricePerCredit?: number;
-          transferNotePrefix?: string;
-        };
-        if (parsed.pricePerCredit && parsed.pricePerCredit > 0) {
-          pricePerCredit = Math.round(parsed.pricePerCredit);
-        }
-        if (parsed.transferNotePrefix) {
-          prefix = parsed.transferNotePrefix;
-        }
-      } catch {
-        // Use defaults
-      }
-    }
-
-    // Mark completed historical terms prior to 2025-2026 as PAID so students have realistic receipt history
-    // while leaving 2025-2026 invoices UNPAID for immediate QR scanning & payment testing.
-    const termTotals = db
-      .prepare(
-        `SELECT e.student_id, e.semester, e.academic_year, SUM(CAST(ROUND(c.credit_hours) AS INTEGER)) as total_credits
-         FROM enrollments e
-         JOIN courses c ON e.course_id = c.course_id
-         WHERE e.completion_status != 'Withdrawn'
-           AND e.academic_year < '2025-2026'
-         GROUP BY e.student_id, e.semester, e.academic_year`
-      )
-      .all() as Array<{
-      student_id: string;
-      semester: string;
-      academic_year: string;
-      total_credits: number;
-    }>;
-
-    const insertPayment = db.prepare(
-      `INSERT OR IGNORE INTO tuition_payments (
-        payment_id, student_id, semester, academic_year, total_credits, unit_price, amount,
-        payment_method, transaction_ref, transfer_note, status, paid_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QR_SCAN', ?, ?, 'PAID', ?, ?)`
-    );
-
-    termTotals.forEach((row, idx) => {
-      const credits = Math.max(1, Math.round(Number(row.total_credits) || 1));
-      const amount = credits * pricePerCredit;
-      const startYear = Number(row.academic_year.slice(0, 4)) || 2024;
-      const isSecondSem = row.semester.includes('2');
-      const isSummer = row.semester.toLowerCase().includes('hè');
-      const paidDate = isSummer
-        ? `${startYear + 1}-07-10T09:15:00.000Z`
-        : isSecondSem
-          ? `${startYear + 1}-02-18T10:30:00.000Z`
-          : `${startYear}-09-20T08:45:00.000Z`;
-      const ref = `UNI-QR-${row.academic_year.slice(2, 4)}${String(idx + 1).padStart(4, '0')}`;
-      const note = buildTuitionTransferNote(prefix, row.student_id, row.semester, row.academic_year);
-
-      insertPayment.run(
-        `PAY-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
-        row.student_id,
-        row.semester,
-        row.academic_year,
-        credits,
-        pricePerCredit,
-        amount,
-        ref,
-        note,
-        paidDate,
-        paidDate
-      );
-    });
-
-    db.prepare(
-      "INSERT INTO schema_migrations (migration_key, applied_at) VALUES ('uniportal_tuition_module_v1', ?)"
-    ).run(now);
-  })();
-}
-
-function ensureDefaultTuitionQrImage(): void {
-  const migrated = db
-    .prepare("SELECT migration_key FROM schema_migrations WHERE migration_key = 'uniportal_default_qr_asset_v1'")
-    .get();
-  if (migrated) return;
-
-  const now = new Date().toISOString();
-  db.transaction(() => {
-    const row = db
-      .prepare("SELECT setting_value FROM academic_settings WHERE setting_name = 'tuition_config'")
-      .get() as { setting_value: string } | undefined;
-
-    if (row) {
-      try {
-        const parsed = JSON.parse(row.setting_value) as Record<string, unknown>;
-        const updated = {
-          ...DEFAULT_TUITION_CONFIG,
-          ...parsed,
-          qrImageDataUrl:
-            typeof parsed.qrImageDataUrl === 'string' && parsed.qrImageDataUrl.length > 0
-              ? parsed.qrImageDataUrl
-              : DEFAULT_TUITION_CONFIG.qrImageDataUrl,
-          bankName:
-            parsed.bankName === 'Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)' ||
-            !parsed.bankName
-              ? DEFAULT_TUITION_CONFIG.bankName
-              : parsed.bankName,
-          updatedAt: now,
-        };
-        db.prepare(
-          "UPDATE academic_settings SET setting_value = ?, updated_at = ? WHERE setting_name = 'tuition_config'"
-        ).run(JSON.stringify(updated), now);
-      } catch {
-        db.prepare(
-          "UPDATE academic_settings SET setting_value = ?, updated_at = ? WHERE setting_name = 'tuition_config'"
-        ).run(JSON.stringify({ ...DEFAULT_TUITION_CONFIG, updatedAt: now }), now);
-      }
-    }
-
-    db.prepare(
-      "INSERT INTO schema_migrations (migration_key, applied_at) VALUES ('uniportal_default_qr_asset_v1', ?)"
-    ).run(now);
-  })();
-}
-
-export function migrateToTenScaleIntegerCreditsAndReports(): void {
-  const alreadyMigrated = db
-    .prepare("SELECT migration_key FROM schema_migrations WHERE migration_key = 'uniportal_scale10_intcredits_reports_v1'")
-    .get();
-
-  if (!alreadyMigrated) {
-    const now = new Date().toISOString();
-    db.transaction(() => {
-      // 1. Update grading_scale in academic_settings if still on legacy 0-100 or contains A-/B-
-      const scaleRow = db
-        .prepare("SELECT setting_value FROM academic_settings WHERE setting_name = 'grading_scale'")
-        .get() as { setting_value: string } | undefined;
-
-      let shouldResetScale = false;
-      if (scaleRow) {
-        try {
-          const parsed = JSON.parse(scaleRow.setting_value) as Array<{
-            letter?: string;
-            maxNumeric?: number;
-          }>;
-          shouldResetScale =
-            !Array.isArray(parsed) ||
-            parsed.some(
-              (item) =>
-                Number(item.maxNumeric ?? 0) > 10 ||
-                item.letter === 'A-' ||
-                item.letter === 'B-'
-            );
-        } catch {
-          shouldResetScale = true;
-        }
-      }
-      if (shouldResetScale) {
-        db.prepare(
-          `UPDATE academic_settings SET setting_value = ?, updated_at = ? WHERE setting_name = 'grading_scale'`
-        ).run(JSON.stringify(DEFAULT_GRADING_SCALE), now);
-      }
-
-      // 2. Ensure all course credit_hours are positive integers >= 1
-      const courses = db
-        .prepare('SELECT course_id, credit_hours FROM courses')
-        .all() as Array<{ course_id: string; credit_hours: number }>;
-      const updCourse = db.prepare('UPDATE courses SET credit_hours = ? WHERE course_id = ?');
-      for (const c of courses) {
-        if (!Number.isInteger(c.credit_hours) || c.credit_hours < 1) {
-          updCourse.run(Math.max(1, Math.round(Number(c.credit_hours) || 1)), c.course_id);
-        }
-      }
-
-      // 3. Migrate enrollment scores from 0-100 to 0-10 and map A-/B- to 9-letter scale
-      const convertTen = (val: number | null): number | null => {
-        if (val === null || val === undefined) return null;
-        const num = Number(val);
-        if (!Number.isFinite(num)) return null;
-        const scaled = num > 10 ? num / 10 : num;
-        return Math.round((scaled + Number.EPSILON) * 100) / 100;
-      };
-
-      const enrollments = db
-        .prepare(
-          `SELECT enrollment_id, attendance_score, assignment_score, midterm_score, final_score,
-                  numeric_grade, letter_grade, grade_point, completion_status
-           FROM enrollments`
-        )
-        .all() as Array<{
-        enrollment_id: string;
-        attendance_score: number | null;
-        assignment_score: number | null;
-        midterm_score: number | null;
-        final_score: number | null;
-        numeric_grade: number | null;
-        letter_grade: string | null;
-        grade_point: number | null;
-        completion_status: string;
-      }>;
-
-      const updEnr = db.prepare(
-        `UPDATE enrollments
-         SET attendance_score = ?, assignment_score = ?, midterm_score = ?, final_score = ?,
-             numeric_grade = ?, letter_grade = ?, grade_point = ?
-         WHERE enrollment_id = ?`
-      );
-
-      for (const e of enrollments) {
-        const att = convertTen(e.attendance_score);
-        const asg = convertTen(e.assignment_score);
-        const mid = convertTen(e.midterm_score);
-        const fin = convertTen(e.final_score);
-        const num = convertTen(e.numeric_grade);
-
-        let letter = e.letter_grade;
-        let point = e.grade_point;
-
-        if (e.completion_status === 'Completed' || e.completion_status === 'Failed') {
-          if (num !== null) {
-            const resolved = resolveLetterFromNumeric(num, DEFAULT_GRADING_SCALE);
-            if (resolved) {
-              letter = resolved.letter;
-              point = resolved.point;
-            }
-          } else if (letter === 'A-') {
-            letter = 'A';
-            point = 4.0;
-          } else if (letter === 'B-') {
-            letter = 'B';
-            point = 3.0;
-          }
-        }
-
-        updEnr.run(att, asg, mid, fin, num, letter, point, e.enrollment_id);
-      }
-
-      // 4. Normalize grade_change_logs scores/letters
-      const logs = db
-        .prepare(
-          'SELECT log_id, previous_numeric_grade, new_numeric_grade, previous_letter_grade, new_letter_grade FROM grade_change_logs'
-        )
-        .all() as Array<{
-        log_id: string;
-        previous_numeric_grade: number | null;
-        new_numeric_grade: number | null;
-        previous_letter_grade: string | null;
-        new_letter_grade: string | null;
-      }>;
-      const updLog = db.prepare(
-        `UPDATE grade_change_logs
-         SET previous_numeric_grade = ?, new_numeric_grade = ?, previous_letter_grade = ?, new_letter_grade = ?
-         WHERE log_id = ?`
-      );
-      const mapLegacyLetter = (l: string | null): string | null => {
-        if (l === 'A-') return 'A';
-        if (l === 'B-') return 'B';
-        return l;
-      };
-      for (const l of logs) {
-        updLog.run(
-          convertTen(l.previous_numeric_grade),
-          convertTen(l.new_numeric_grade),
-          mapLegacyLetter(l.previous_letter_grade),
-          mapLegacyLetter(l.new_letter_grade),
-          l.log_id
-        );
-      }
-
-      db.prepare(
-        "INSERT INTO schema_migrations (migration_key, applied_at) VALUES ('uniportal_scale10_intcredits_reports_v1', ?)"
-      ).run(now);
-    })();
-  }
-
-  ensureAcademicReportsSeeded();
 }
 
 export function seedDatabaseIfEmpty(): boolean {
@@ -1386,9 +866,6 @@ export function seedDatabaseIfEmpty(): boolean {
   if (userCount.count > 0) {
     migrateLegacyTermsAndEnsureDemoJourney();
     ensureThreeRoleSystemAndDemoAccounts();
-    migrateToTenScaleIntegerCreditsAndReports();
-    ensureTuitionModuleInitialized();
-    ensureDefaultTuitionQrImage();
     return false;
   }
 
@@ -1590,38 +1067,38 @@ export function seedDatabaseIfEmpty(): boolean {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // Sinh viên 1: Nguyễn Minh Phương (22000001) — 75/130 tín chỉ, Giỏi
+  // Sinh viên 1: Nguyễn Minh Phương (22000001) — Exact 75/130 tín chỉ, CGPA = 3.20 (240.0 / 75), Xếp loại Giỏi
   const phuongEnrollments: Array<[string, string, string, string, string | null, number | null, number | null, string]> = [
-    // Học kỳ 1 (2022-2023)
-    ['ENR-P-01', 'CRS-CS101', 'Học kỳ 1', '2022-2023', 'B', 7.6, 3.0, 'Completed'],
-    ['ENR-P-02', 'CRS-MAT101', 'Học kỳ 1', '2022-2023', 'C+', 6.7, 2.5, 'Completed'],
-    ['ENR-P-03', 'CRS-ENG101', 'Học kỳ 1', '2022-2023', 'B', 7.8, 3.0, 'Completed'],
-    ['ENR-P-04', 'CRS-ECO101', 'Học kỳ 1', '2022-2023', 'C+', 6.8, 2.5, 'Completed'],
-    ['ENR-P-05', 'CRS-PHY101', 'Học kỳ 1', '2022-2023', 'C+', 6.6, 2.5, 'Completed'],
-    // Học kỳ 2 (2022-2023)
-    ['ENR-P-06', 'CRS-CS102', 'Học kỳ 2', '2022-2023', 'B+', 8.1, 3.5, 'Completed'],
-    ['ENR-P-07', 'CRS-MAT102', 'Học kỳ 2', '2022-2023', 'B', 7.7, 3.0, 'Completed'],
-    ['ENR-P-08', 'CRS-MIS201', 'Học kỳ 2', '2022-2023', 'B', 7.9, 3.0, 'Completed'],
-    ['ENR-P-09', 'CRS-STA201', 'Học kỳ 2', '2022-2023', 'C+', 6.8, 2.5, 'Completed'],
-    ['ENR-P-10', 'CRS-HUM102', 'Học kỳ 2', '2022-2023', 'C+', 6.9, 2.5, 'Completed'],
-    // Học kỳ 3 (2023-2024)
-    ['ENR-P-11', 'CRS-CS201', 'Học kỳ 3', '2023-2024', 'B+', 8.2, 3.5, 'Completed'],
-    ['ENR-P-12', 'CRS-CS202', 'Học kỳ 3', '2023-2024', 'B+', 8.3, 3.5, 'Completed'],
-    ['ENR-P-13', 'CRS-CS203', 'Học kỳ 3', '2023-2024', 'B', 7.6, 3.0, 'Completed'],
-    ['ENR-P-14', 'CRS-SE201', 'Học kỳ 3', '2023-2024', 'B', 7.7, 3.0, 'Completed'],
-    ['ENR-P-15', 'CRS-MGT202', 'Học kỳ 3', '2023-2024', 'C+', 6.8, 2.5, 'Completed'],
-    // Học kỳ 4 (2023-2024)
-    ['ENR-P-16', 'CRS-CS301', 'Học kỳ 4', '2023-2024', 'A', 9.1, 4.0, 'Completed'],
-    ['ENR-P-17', 'CRS-CS302', 'Học kỳ 4', '2023-2024', 'B+', 8.3, 3.5, 'Completed'],
-    ['ENR-P-18', 'CRS-CS303', 'Học kỳ 4', '2023-2024', 'B+', 8.4, 3.5, 'Completed'],
-    ['ENR-P-19', 'CRS-AI301', 'Học kỳ 4', '2023-2024', 'B+', 8.1, 3.5, 'Completed'],
-    ['ENR-P-20', 'CRS-SEC301', 'Học kỳ 4', '2023-2024', 'B', 7.8, 3.0, 'Completed'],
-    // Học kỳ 5 (2024-2025)
-    ['ENR-P-21', 'CRS-MGT101', 'Học kỳ 5', '2024-2025', 'A', 9.3, 4.0, 'Completed'],
-    ['ENR-P-22', 'CRS-ACC101', 'Học kỳ 5', '2024-2025', 'A', 9.2, 4.0, 'Completed'],
-    ['ENR-P-23', 'CRS-FIN201', 'Học kỳ 5', '2024-2025', 'A', 9.0, 4.0, 'Completed'],
-    ['ENR-P-24', 'CRS-BUS102', 'Học kỳ 5', '2024-2025', 'B+', 8.4, 3.5, 'Completed'],
-    ['ENR-P-25', 'CRS-MKT201', 'Học kỳ 5', '2024-2025', 'B+', 8.2, 3.5, 'Completed'],
+    // Học kỳ 1 (2022-2023): 15 cr -> 40.5 pts -> 2.70
+    ['ENR-P-01', 'CRS-CS101', 'Học kỳ 1', '2022-2023', 'B', 76, 3.0, 'Completed'],
+    ['ENR-P-02', 'CRS-MAT101', 'Học kỳ 1', '2022-2023', 'C+', 67, 2.5, 'Completed'],
+    ['ENR-P-03', 'CRS-ENG101', 'Học kỳ 1', '2022-2023', 'B', 78, 3.0, 'Completed'],
+    ['ENR-P-04', 'CRS-ECO101', 'Học kỳ 1', '2022-2023', 'C+', 68, 2.5, 'Completed'],
+    ['ENR-P-05', 'CRS-PHY101', 'Học kỳ 1', '2022-2023', 'C+', 66, 2.5, 'Completed'],
+    // Học kỳ 2 (2022-2023): 15 cr -> 43.5 pts -> 2.90
+    ['ENR-P-06', 'CRS-CS102', 'Học kỳ 2', '2022-2023', 'B+', 81, 3.5, 'Completed'],
+    ['ENR-P-07', 'CRS-MAT102', 'Học kỳ 2', '2022-2023', 'B', 77, 3.0, 'Completed'],
+    ['ENR-P-08', 'CRS-MIS201', 'Học kỳ 2', '2022-2023', 'B', 79, 3.0, 'Completed'],
+    ['ENR-P-09', 'CRS-STA201', 'Học kỳ 2', '2022-2023', 'C+', 68, 2.5, 'Completed'],
+    ['ENR-P-10', 'CRS-HUM102', 'Học kỳ 2', '2022-2023', 'C+', 69, 2.5, 'Completed'],
+    // Học kỳ 3 (2023-2024): 15 cr -> 46.5 pts -> 3.10
+    ['ENR-P-11', 'CRS-CS201', 'Học kỳ 3', '2023-2024', 'B+', 82, 3.5, 'Completed'],
+    ['ENR-P-12', 'CRS-CS202', 'Học kỳ 3', '2023-2024', 'B+', 83, 3.5, 'Completed'],
+    ['ENR-P-13', 'CRS-CS203', 'Học kỳ 3', '2023-2024', 'B', 76, 3.0, 'Completed'],
+    ['ENR-P-14', 'CRS-SE201', 'Học kỳ 3', '2023-2024', 'B', 77, 3.0, 'Completed'],
+    ['ENR-P-15', 'CRS-MGT202', 'Học kỳ 3', '2023-2024', 'C+', 68, 2.5, 'Completed'],
+    // Học kỳ 4 (2023-2024): 15 cr -> 52.5 pts -> 3.50
+    ['ENR-P-16', 'CRS-CS301', 'Học kỳ 4', '2023-2024', 'A', 91, 4.0, 'Completed'],
+    ['ENR-P-17', 'CRS-CS302', 'Học kỳ 4', '2023-2024', 'B+', 83, 3.5, 'Completed'],
+    ['ENR-P-18', 'CRS-CS303', 'Học kỳ 4', '2023-2024', 'B+', 84, 3.5, 'Completed'],
+    ['ENR-P-19', 'CRS-AI301', 'Học kỳ 4', '2023-2024', 'B+', 81, 3.5, 'Completed'],
+    ['ENR-P-20', 'CRS-SEC301', 'Học kỳ 4', '2023-2024', 'B', 78, 3.0, 'Completed'],
+    // Học kỳ 5 (2024-2025): 15 cr -> 57.0 pts -> 3.80
+    ['ENR-P-21', 'CRS-MGT101', 'Học kỳ 5', '2024-2025', 'A', 93, 4.0, 'Completed'],
+    ['ENR-P-22', 'CRS-ACC101', 'Học kỳ 5', '2024-2025', 'A', 92, 4.0, 'Completed'],
+    ['ENR-P-23', 'CRS-FIN201', 'Học kỳ 5', '2024-2025', 'A', 90, 4.0, 'Completed'],
+    ['ENR-P-24', 'CRS-BUS102', 'Học kỳ 5', '2024-2025', 'B+', 84, 3.5, 'Completed'],
+    ['ENR-P-25', 'CRS-MKT201', 'Học kỳ 5', '2024-2025', 'B+', 82, 3.5, 'Completed'],
     // Học kỳ 6 (2025-2026): Đang học (không tính vào GPA)
     ['ENR-P-26', 'CRS-CS401', 'Học kỳ 6', '2025-2026', null, null, null, 'In Progress'],
   ];
@@ -1630,26 +1107,26 @@ export function seedDatabaseIfEmpty(): boolean {
     insertEnrollment.run(row[0], '22000001', row[1], row[2], row[3], row[4], row[5], row[6], row[7], 0, now);
   }
 
-  // Sinh viên 2: Trần Hoàng Nam (22000002) — 45/130 tín chỉ đạt, 9 tín chỉ chưa đạt, CGPA < 2.00
+  // Sinh viên 2: Trần Hoàng Nam (22000002) — Exact 45/130 tín chỉ đạt, 9 tín chỉ chưa đạt, CGPA = 1.85 (99.9 / 54)
   const namEnrollments: Array<[string, string, string, string, string | null, number | null, number | null, string]> = [
-    ['ENR-N-01', 'CRS-ECO101', 'Học kỳ 1', '2022-2023', 'C', 6.0, 2.0, 'Completed'],
-    ['ENR-N-02', 'CRS-MAT101', 'Học kỳ 1', '2022-2023', 'D+', 5.2, 1.5, 'Completed'],
-    ['ENR-N-03', 'CRS-ENG101', 'Học kỳ 1', '2022-2023', 'C+', 6.6, 2.5, 'Completed'],
-    ['ENR-N-04', 'CRS-CS101', 'Học kỳ 1', '2022-2023', 'C', 5.8, 2.0, 'Completed'],
-    ['ENR-N-05', 'CRS-MGT101', 'Học kỳ 1', '2022-2023', 'B', 7.2, 3.0, 'Completed'],
-    ['ENR-N-06', 'CRS-ACC101', 'Học kỳ 2', '2022-2023', 'D+', 5.1, 1.5, 'Completed'],
-    ['ENR-N-07', 'CRS-STA201', 'Học kỳ 2', '2022-2023', 'F', 3.4, 0.0, 'Failed'],
-    ['ENR-N-08', 'CRS-MIS201', 'Học kỳ 2', '2022-2023', 'C+', 6.7, 2.5, 'Completed'],
-    ['ENR-N-09', 'CRS-FIN201', 'Học kỳ 2', '2022-2023', 'D', 4.5, 1.0, 'Completed'],
-    ['ENR-N-10', 'CRS-BUS102', 'Học kỳ 2', '2022-2023', 'C', 5.9, 2.0, 'Completed'],
-    ['ENR-N-11', 'CRS-ECO201', 'Học kỳ 3', '2023-2024', 'B+', 8.1, 3.5, 'Completed'],
-    ['ENR-N-12', 'CRS-CS202', 'Học kỳ 3', '2023-2024', 'F', 3.1, 0.0, 'Failed'],
-    ['ENR-N-13', 'CRS-LAW201', 'Học kỳ 3', '2023-2024', 'B', 7.1, 3.0, 'Completed'],
-    ['ENR-N-14', 'CRS-MKT201', 'Học kỳ 3', '2023-2024', 'C', 6.1, 2.0, 'Completed'],
-    ['ENR-N-15', 'CRS-CS301', 'Học kỳ 4', '2023-2024', 'B', 7.3, 3.0, 'Completed'],
-    ['ENR-N-16', 'CRS-FIN301', 'Học kỳ 4', '2023-2024', 'F', 2.8, 0.0, 'Failed'],
-    ['ENR-N-17', 'CRS-OPS301', 'Học kỳ 4', '2023-2024', 'B', 7.1, 3.0, 'Completed'],
-    ['ENR-N-18', 'CRS-HRM201', 'Học kỳ 4', '2023-2024', 'C', 6.2, 2.0, 'Completed'],
+    ['ENR-N-01', 'CRS-ECO101', 'Học kỳ 1', '2022-2023', 'C', 60, 2.0, 'Completed'],
+    ['ENR-N-02', 'CRS-MAT101', 'Học kỳ 1', '2022-2023', 'D+', 52, 1.5, 'Completed'],
+    ['ENR-N-03', 'CRS-ENG101', 'Học kỳ 1', '2022-2023', 'C+', 66, 2.5, 'Completed'],
+    ['ENR-N-04', 'CRS-CS101', 'Học kỳ 1', '2022-2023', 'C', 58, 2.0, 'Completed'],
+    ['ENR-N-05', 'CRS-MGT101', 'Học kỳ 1', '2022-2023', 'B-', 72, 2.7, 'Completed'],
+    ['ENR-N-06', 'CRS-ACC101', 'Học kỳ 2', '2022-2023', 'D+', 51, 1.5, 'Completed'],
+    ['ENR-N-07', 'CRS-STA201', 'Học kỳ 2', '2022-2023', 'F', 34, 0.0, 'Failed'],
+    ['ENR-N-08', 'CRS-MIS201', 'Học kỳ 2', '2022-2023', 'C+', 67, 2.5, 'Completed'],
+    ['ENR-N-09', 'CRS-FIN201', 'Học kỳ 2', '2022-2023', 'D', 45, 1.0, 'Completed'],
+    ['ENR-N-10', 'CRS-BUS102', 'Học kỳ 2', '2022-2023', 'C', 59, 2.0, 'Completed'],
+    ['ENR-N-11', 'CRS-ECO201', 'Học kỳ 3', '2023-2024', 'B+', 81, 3.5, 'Completed'],
+    ['ENR-N-12', 'CRS-CS202', 'Học kỳ 3', '2023-2024', 'F', 31, 0.0, 'Failed'],
+    ['ENR-N-13', 'CRS-LAW201', 'Học kỳ 3', '2023-2024', 'B-', 71, 2.7, 'Completed'],
+    ['ENR-N-14', 'CRS-MKT201', 'Học kỳ 3', '2023-2024', 'C', 61, 2.0, 'Completed'],
+    ['ENR-N-15', 'CRS-CS301', 'Học kỳ 4', '2023-2024', 'B-', 73, 2.7, 'Completed'],
+    ['ENR-N-16', 'CRS-FIN301', 'Học kỳ 4', '2023-2024', 'F', 28, 0.0, 'Failed'],
+    ['ENR-N-17', 'CRS-OPS301', 'Học kỳ 4', '2023-2024', 'B-', 71, 2.7, 'Completed'],
+    ['ENR-N-18', 'CRS-HRM201', 'Học kỳ 4', '2023-2024', 'C', 62, 2.0, 'Completed'],
     ['ENR-N-19', 'CRS-MGT202', 'Học kỳ 5', '2024-2025', null, null, null, 'In Progress'],
   ];
 
@@ -1657,18 +1134,18 @@ export function seedDatabaseIfEmpty(): boolean {
     insertEnrollment.run(row[0], '22000002', row[1], row[2], row[3], row[4], row[5], row[6], row[7], 0, now);
   }
 
-  // Sinh viên 3: Lê Thảo Vy (23000018) — 30/130 tín chỉ, Xuất sắc
+  // Sinh viên 3: Lê Thảo Vy (23000018) — 30/130 tín chỉ, Xuất sắc (~3.81)
   const vyEnrollments: Array<[string, string, string, string, string | null, number | null, number | null, string]> = [
-    ['ENR-V-01', 'CRS-CS101', 'Học kỳ 1', '2023-2024', 'A+', 9.5, 4.0, 'Completed'],
-    ['ENR-V-02', 'CRS-MAT101', 'Học kỳ 1', '2023-2024', 'A', 8.8, 4.0, 'Completed'],
-    ['ENR-V-03', 'CRS-ENG101', 'Học kỳ 1', '2023-2024', 'A', 9.2, 4.0, 'Completed'],
-    ['ENR-V-04', 'CRS-PHY101', 'Học kỳ 1', '2023-2024', 'B+', 8.3, 3.5, 'Completed'],
-    ['ENR-V-05', 'CRS-ECO101', 'Học kỳ 1', '2023-2024', 'A', 8.7, 4.0, 'Completed'],
-    ['ENR-V-06', 'CRS-CS102', 'Học kỳ 2', '2023-2024', 'A+', 9.6, 4.0, 'Completed'],
-    ['ENR-V-07', 'CRS-MAT102', 'Học kỳ 2', '2023-2024', 'A', 9.1, 4.0, 'Completed'],
-    ['ENR-V-08', 'CRS-STA201', 'Học kỳ 2', '2023-2024', 'A', 8.6, 4.0, 'Completed'],
-    ['ENR-V-09', 'CRS-CS201', 'Học kỳ 2', '2023-2024', 'A', 9.4, 4.0, 'Completed'],
-    ['ENR-V-10', 'CRS-HUM102', 'Học kỳ 2', '2023-2024', 'B+', 8.4, 3.5, 'Completed'],
+    ['ENR-V-01', 'CRS-CS101', 'Học kỳ 1', '2023-2024', 'A', 95, 4.0, 'Completed'],
+    ['ENR-V-02', 'CRS-MAT101', 'Học kỳ 1', '2023-2024', 'A-', 88, 3.7, 'Completed'],
+    ['ENR-V-03', 'CRS-ENG101', 'Học kỳ 1', '2023-2024', 'A', 92, 4.0, 'Completed'],
+    ['ENR-V-04', 'CRS-PHY101', 'Học kỳ 1', '2023-2024', 'B+', 83, 3.5, 'Completed'],
+    ['ENR-V-05', 'CRS-ECO101', 'Học kỳ 1', '2023-2024', 'A-', 87, 3.7, 'Completed'],
+    ['ENR-V-06', 'CRS-CS102', 'Học kỳ 2', '2023-2024', 'A', 96, 4.0, 'Completed'],
+    ['ENR-V-07', 'CRS-MAT102', 'Học kỳ 2', '2023-2024', 'A', 91, 4.0, 'Completed'],
+    ['ENR-V-08', 'CRS-STA201', 'Học kỳ 2', '2023-2024', 'A-', 86, 3.7, 'Completed'],
+    ['ENR-V-09', 'CRS-CS201', 'Học kỳ 2', '2023-2024', 'A', 94, 4.0, 'Completed'],
+    ['ENR-V-10', 'CRS-HUM102', 'Học kỳ 2', '2023-2024', 'B+', 84, 3.5, 'Completed'],
   ];
 
   for (const row of vyEnrollments) {
@@ -1677,9 +1154,6 @@ export function seedDatabaseIfEmpty(): boolean {
 
   migrateLegacyTermsAndEnsureDemoJourney();
   ensureThreeRoleSystemAndDemoAccounts();
-  migrateToTenScaleIntegerCreditsAndReports();
-  ensureTuitionModuleInitialized();
-  ensureDefaultTuitionQrImage();
 
   const insertActivity = db.prepare(`
     INSERT INTO academic_activities (activity_id, student_id, actor_user_id, activity_type, description, created_at)

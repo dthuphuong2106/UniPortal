@@ -2,10 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Calculator, CheckCircle2, Info, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import {
   formatGpa,
-  formatTenScale,
   getClassificationForGpa,
   roundGpa,
-  validateCourseCredit,
 } from '../../shared/academicLogic.ts';
 import { StudentOverviewResponse } from '../services/api.ts';
 import { SemanticStatusBadge, SemanticTone } from '../components/PortalUI.tsx';
@@ -55,21 +53,11 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
     [summary.semesters, selectedSemKey]
   );
 
-  const sandboxValidationError = useMemo(() => {
-    for (const row of sandboxRows) {
-      const check = validateCourseCredit(row.credits);
-      if (!check.valid) {
-        return `"${row.name || 'Học phần'}": ${check.error}`;
-      }
-    }
-    return null;
-  }, [sandboxRows]);
-
   const sandboxResult = useMemo(() => {
     let totalCredits = 0;
     let totalWeighted = 0;
     for (const row of sandboxRows) {
-      if (Number.isInteger(row.credits) && row.credits >= 1 && row.gradePoint >= 0) {
+      if (row.credits > 0 && row.gradePoint >= 0) {
         totalCredits += row.credits;
         totalWeighted += row.credits * row.gradePoint;
       }
@@ -127,6 +115,10 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
     mode === 'official'
       ? selectedSemester?.semesterGpaCredits ?? summary.gpaEligibleCredits
       : sandboxResult.totalCredits;
+  const activeDisplayWeighted =
+    mode === 'official'
+      ? selectedSemester?.semesterWeightedPoints ?? summary.totalWeightedPoints
+      : sandboxResult.totalWeighted;
   const activeClassification = getClassificationForGpa(
     activeDisplayGpa,
     settings.classificationBands
@@ -190,7 +182,7 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                     Chọn học kỳ để tính chi tiết
                   </h2>
                   <p className="text-xs text-[#858BA3] mt-0.5">
-                    Xem chi tiết điểm từng học kỳ hoặc chuyển sang chế độ tính thử
+                    Kiểm tra công thức tính trọng số từng học kỳ hoặc chuyển sang chế độ tính thử
                   </p>
                 </div>
 
@@ -216,9 +208,9 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                         <tr className="bg-[#F8F9FD] border-b border-[#ECEEF5] text-xs font-semibold text-[#858BA3]">
                           <th className="py-2.5 px-3">Học phần</th>
                           <th className="py-2.5 px-3 text-right">Tín chỉ</th>
-                          <th className="py-2.5 px-3 text-right">Hệ 10</th>
                           <th className="py-2.5 px-3 text-center">Điểm chữ</th>
                           <th className="py-2.5 px-3 text-right">Hệ 4</th>
+                          <th className="py-2.5 px-3 text-right">Điểm × TC</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#ECEEF5] text-sm">
@@ -233,14 +225,16 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                             <td className="py-3 px-3 text-right font-mono tabular-nums">
                               {c.credit_hours}
                             </td>
-                            <td className="py-3 px-3 text-right font-mono tabular-nums text-[#555C75]">
-                              {formatTenScale(c.numeric_grade)}
-                            </td>
                             <td className="py-3 px-3 text-center font-mono font-semibold">
                               {c.letter_grade ?? '—'}
                             </td>
                             <td className="py-3 px-3 text-right font-mono tabular-nums">
-                              {c.grade_point !== null ? c.grade_point.toFixed(1) : '—'}
+                              {c.grade_point !== null ? c.grade_point.toFixed(2) : '—'}
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono font-semibold tabular-nums text-[#20243A]">
+                              {c.grade_point !== null
+                                ? (c.credit_hours * c.grade_point).toFixed(2)
+                                : '—'}
                             </td>
                           </tr>
                         ))}
@@ -311,24 +305,20 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                     <div className="col-span-4 sm:col-span-2">
                       <input
                         type="number"
-                        min="1"
-                        step="1"
+                        min="0.5"
+                        max="12"
+                        step="0.5"
                         value={row.credits}
-                        onKeyDown={(e) => {
-                          if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) {
-                            e.preventDefault();
-                          }
-                        }}
                         onChange={(e) =>
                           updateSandboxRow(row.id, {
-                            credits: Number(e.target.value),
+                            credits: Math.max(0, Number(e.target.value)),
                           })
                         }
-                        aria-label="Số tín chỉ (nguyên dương)"
+                        aria-label="Số tín chỉ"
                         className="w-full px-2.5 py-1.5 text-sm font-mono bg-white border border-[#ECEEF5] rounded-lg text-center"
                       />
                     </div>
-                    <div className="col-span-6 sm:col-span-4">
+                    <div className="col-span-5 sm:col-span-3">
                       <select
                         value={row.gradePoint}
                         onChange={(e) =>
@@ -339,10 +329,13 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                       >
                         {settings.gradingScale.map((g) => (
                           <option key={g.letter} value={g.point}>
-                            {g.letter} ({g.point.toFixed(1)} · {g.minNumeric}–{g.maxNumeric})
+                            {g.letter} ({g.point.toFixed(1)})
                           </option>
                         ))}
                       </select>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1 text-right font-mono text-xs font-semibold text-[#20243A] tabular-nums">
+                      {(row.credits * row.gradePoint).toFixed(1)}
                     </div>
                     <div className="col-span-1 text-right">
                       <button
@@ -356,11 +349,6 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                     </div>
                   </div>
                 ))}
-                {sandboxValidationError && (
-                  <p role="alert" className="text-xs font-medium text-[#C83D4C] px-1">
-                    {sandboxValidationError}
-                  </p>
-                )}
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-[#ECEEF5]">
@@ -399,7 +387,7 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
               <p className="text-xs text-[#858BA3] mt-0.5">
                 {mode === 'official' && selectedSemester
                   ? `Năm học ${selectedSemester.academic_year}`
-                  : 'Tính theo số tín chỉ trên thang điểm 4.00'}
+                  : 'Tính theo trọng số tín chỉ thang điểm 4.00'}
               </p>
             </div>
             <SemanticStatusBadge
@@ -442,7 +430,7 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
             </div>
           </div>
 
-          {/* Metrics */}
+          {/* Metrics & Formula */}
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="p-3.5 rounded-xl bg-[#F8F9FD] border border-[#ECEEF5]">
@@ -452,10 +440,21 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                 </div>
               </div>
               <div className="p-3.5 rounded-xl bg-[#F8F9FD] border border-[#ECEEF5]">
-                <div className="text-xs text-[#858BA3]">Xếp loại học lực</div>
-                <div className="font-semibold text-base text-[#6558E8] mt-1">
-                  {activeClassification.label}
+                <div className="text-xs text-[#858BA3]">Tổng điểm trọng số</div>
+                <div className="font-mono font-bold text-lg text-[#6558E8] mt-0.5 tabular-nums">
+                  {activeDisplayWeighted.toFixed(2)}
                 </div>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-[#F0EDFF]/60 border border-[#8174F7]/20 font-mono text-xs text-[#20243A] space-y-1">
+              <div className="text-[#6558E8] font-semibold">
+                Công thức: GPA = Σ(Điểm hệ 4 × Tín chỉ) / Σ(Tín chỉ)
+              </div>
+              <div className="tabular-nums">
+                {activeDisplayCredits > 0
+                  ? `${activeDisplayWeighted.toFixed(2)} / ${activeDisplayCredits} = ${formatGpa(activeDisplayGpa)}`
+                  : 'Chưa có học phần có điểm trong kỳ này.'}
               </div>
             </div>
 
@@ -484,7 +483,8 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
               </p>
             </div>
             <div className="text-xs font-mono text-[#6558E8] font-semibold tabular-nums">
-              GPA tích lũy: {formatGpa(summary.cgpa)} ({summary.gpaEligibleCredits} tín chỉ tính GPA)
+              Tổng trọng số: {summary.totalWeightedPoints.toFixed(2)} / {summary.gpaEligibleCredits}{' '}
+              tín chỉ = {formatGpa(summary.cgpa)}
             </div>
           </div>
 
@@ -495,9 +495,9 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                   <th className="py-3 px-5">Kỳ học</th>
                   <th className="py-3 px-5">Học phần</th>
                   <th className="py-3 px-5 text-right">Tín chỉ</th>
-                  <th className="py-3 px-5 text-right">Hệ 10</th>
                   <th className="py-3 px-5 text-center">Điểm chữ</th>
                   <th className="py-3 px-5 text-right">Hệ 4</th>
+                  <th className="py-3 px-5 text-right">Điểm × TC</th>
                   <th className="py-3 px-5">Trạng thái tính GPA</th>
                 </tr>
               </thead>
@@ -521,14 +521,14 @@ export function GpaCalculatorPage({ overview }: { overview: StudentOverviewRespo
                     <td className="py-3 px-5 text-right font-mono tabular-nums">
                       {row.credit_hours}
                     </td>
-                    <td className="py-3 px-5 text-right font-mono tabular-nums text-[#555C75]">
-                      {formatTenScale(row.numeric_grade)}
-                    </td>
                     <td className="py-3 px-5 text-center font-mono font-semibold">
                       {row.letter_grade ?? '—'}
                     </td>
                     <td className="py-3 px-5 text-right font-mono tabular-nums">
-                      {row.grade_point !== null ? row.grade_point.toFixed(1) : '—'}
+                      {row.grade_point !== null ? row.grade_point.toFixed(2) : '—'}
+                    </td>
+                    <td className="py-3 px-5 text-right font-mono font-semibold tabular-nums text-[#20243A]">
+                      {row.included_in_gpa ? row.weighted_points.toFixed(2) : '0.00'}
                     </td>
                     <td className="py-3 px-5 text-xs">
                       {row.included_in_gpa ? (

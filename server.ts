@@ -1,5 +1,4 @@
 import express, { NextFunction, Request, Response } from 'express';
-import http from 'http';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -25,12 +24,7 @@ import {
   getStudentById,
   getStudentByUserId,
   getStudentEnrollments,
-  getStudentReports,
-  getStudentTuitionOverview,
-  getTrainingTuitionOverview,
-  getTuitionConfig,
   logAcademicActivity,
-  markStudentReportRead,
   recalculateAllStudents,
   syncStudentDerivedRecords,
 } from './server/academicService.ts';
@@ -39,23 +33,15 @@ import {
   AssessmentWeightsConfig,
   calculateStudentAcademicSummary,
   CompletionStatus,
-  DEFAULT_TUITION_CONFIG,
   computeWeightedNumericGrade,
   GradeApprovalRecord,
   GradeSubmissionRecord,
-  isValidIntegerCredit,
   LecturerProfile,
   normalizeUserRole,
   resolveGradeFromScale,
   resolveLetterFromNumeric,
   StudentProfile,
-  TuitionConfig,
-  TuitionPaymentRecord,
   UserRole,
-  buildTuitionTransferNote,
-  isValidIsoDateYmd,
-  validateCourseCredit,
-  validateScoreOnTenScale,
 } from './shared/academicLogic.ts';
 
 interface AuthTokenPayload {
@@ -86,11 +72,10 @@ const JWT_SECRET = getJwtSecret();
 initializeDatabaseSchema();
 seedDatabaseIfEmpty();
 recalculateAllStudents();
-db.pragma('wal_checkpoint(TRUNCATE)');
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
 function isRequestHttps(req: Request): boolean {
@@ -366,89 +351,16 @@ app.get('/api/students/:studentId/overview', requireAuth, (req: AuthenticatedReq
     )
     .all(studentId);
 
-  const { reports, unreadReportsCount } = getStudentReports(studentId);
-  const tuitionOverview = getStudentTuitionOverview(studentId);
-
   res.json({
     student,
     summary,
     enrollments,
     warnings,
-    reports,
-    unreadReportsCount,
     activities,
     settings,
     academicTerms: getAcademicTerms(),
-    tuitionSummary: tuitionOverview.summary,
   });
 });
-
-app.get('/api/students/:studentId/reports', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  const { studentId } = req.params;
-  if (!assertStudentAccess(req, res, studentId)) return;
-
-  const student = getStudentById(studentId);
-  if (!student) {
-    res.status(404).json({ error: 'Không tìm thấy hồ sơ sinh viên.' });
-    return;
-  }
-
-  res.json(getStudentReports(studentId));
-});
-
-app.patch(
-  '/api/students/:studentId/reports/:reportId/read',
-  requireAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    const { studentId, reportId } = req.params;
-    if (!assertStudentAccess(req, res, studentId)) return;
-
-    const student = getStudentById(studentId);
-    if (!student) {
-      res.status(404).json({ error: 'Không tìm thấy hồ sơ sinh viên.' });
-      return;
-    }
-
-    const updated = markStudentReportRead(studentId, reportId, req.authUser?.user_id);
-    if (!updated) {
-      res.status(404).json({ error: 'Không tìm thấy báo cáo học vụ phù hợp.' });
-      return;
-    }
-
-    res.json({
-      ok: true,
-      report: updated.report,
-      unreadReportsCount: updated.unreadReportsCount,
-    });
-  }
-);
-
-app.post(
-  '/api/students/:studentId/reports/:reportId/read',
-  requireAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    const { studentId, reportId } = req.params;
-    if (!assertStudentAccess(req, res, studentId)) return;
-
-    const student = getStudentById(studentId);
-    if (!student) {
-      res.status(404).json({ error: 'Không tìm thấy hồ sơ sinh viên.' });
-      return;
-    }
-
-    const updated = markStudentReportRead(studentId, reportId, req.authUser?.user_id);
-    if (!updated) {
-      res.status(404).json({ error: 'Không tìm thấy báo cáo học vụ phù hợp.' });
-      return;
-    }
-
-    res.json({
-      ok: true,
-      report: updated.report,
-      unreadReportsCount: updated.unreadReportsCount,
-    });
-  }
-);
 
 app.put('/api/students/:studentId/profile', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const { studentId } = req.params;
@@ -529,7 +441,7 @@ app.post(
 
     const code = course_code?.trim().toUpperCase() ?? '';
     const name = course_name?.trim() ?? '';
-    const creditCheck = validateCourseCredit(credit_hours);
+    const credits = Number(credit_hours);
     const sem = semester?.trim() ?? '';
     const year = academic_year?.trim() ?? '';
     const status: CompletionStatus = completion_status ?? 'Completed';
@@ -538,11 +450,10 @@ app.post(
       res.status(400).json({ error: 'Mã học phần và tên học phần là bắt buộc.' });
       return;
     }
-    if (!creditCheck.valid) {
-      res.status(400).json({ error: creditCheck.error });
+    if (!Number.isFinite(credits) || credits <= 0 || credits > 12) {
+      res.status(400).json({ error: 'Số tín chỉ phải là số dương từ 0.5 đến 12.' });
       return;
     }
-    const credits = creditCheck.value;
     if (!sem || !year) {
       res.status(400).json({ error: 'Vui lòng nhập đầy đủ học kỳ và năm học.' });
       return;
@@ -554,12 +465,15 @@ app.post(
 
     const settings = getAcademicSettings();
     let finalLetter: string | null = letter_grade ? letter_grade.trim().toUpperCase() : null;
-    const scoreCheck = validateScoreOnTenScale(numeric_grade);
-    if (!scoreCheck.valid) {
-      res.status(400).json({ error: scoreCheck.error });
+    let finalNumeric: number | null =
+      numeric_grade !== undefined && numeric_grade !== null && String(numeric_grade) !== ''
+        ? Number(numeric_grade)
+        : null;
+
+    if (finalNumeric !== null && (!Number.isFinite(finalNumeric) || finalNumeric < 0 || finalNumeric > 100)) {
+      res.status(400).json({ error: 'Điểm số thang 100 phải nằm trong khoảng 0 đến 100.' });
       return;
     }
-    let finalNumeric: number | null = scoreCheck.value;
 
     let finalPoint: number | null = null;
     if (status === 'Completed' || status === 'Failed') {
@@ -716,10 +630,7 @@ app.put(
 
     const code = (course_code ?? existing.course_code).trim().toUpperCase();
     const name = (course_name ?? existing.course_name).trim();
-    const creditCheck =
-      credit_hours !== undefined
-        ? validateCourseCredit(credit_hours)
-        : { valid: true, value: Math.max(1, Math.round(existing.credit_hours)) };
+    const credits = credit_hours !== undefined ? Number(credit_hours) : existing.credit_hours;
     const sem = (semester ?? existing.semester).trim();
     const year = (academic_year ?? existing.academic_year).trim();
     const status: CompletionStatus = completion_status ?? 'Completed';
@@ -728,11 +639,10 @@ app.put(
       res.status(400).json({ error: 'Mã học phần, tên học phần, học kỳ và năm học là bắt buộc.' });
       return;
     }
-    if (!creditCheck.valid) {
-      res.status(400).json({ error: creditCheck.error });
+    if (!Number.isFinite(credits) || credits <= 0 || credits > 12) {
+      res.status(400).json({ error: 'Số tín chỉ phải là số dương từ 0.5 đến 12.' });
       return;
     }
-    const credits = creditCheck.value;
     if (!['Completed', 'Failed', 'In Progress', 'Withdrawn'].includes(status)) {
       res.status(400).json({ error: 'Trạng thái học phần không hợp lệ.' });
       return;
@@ -740,12 +650,15 @@ app.put(
 
     const settings = getAcademicSettings();
     let finalLetter: string | null = letter_grade ? letter_grade.trim().toUpperCase() : null;
-    const scoreCheck = validateScoreOnTenScale(numeric_grade);
-    if (!scoreCheck.valid) {
-      res.status(400).json({ error: scoreCheck.error });
+    let finalNumeric: number | null =
+      numeric_grade !== undefined && numeric_grade !== null && String(numeric_grade) !== ''
+        ? Number(numeric_grade)
+        : null;
+
+    if (finalNumeric !== null && (!Number.isFinite(finalNumeric) || finalNumeric < 0 || finalNumeric > 100)) {
+      res.status(400).json({ error: 'Điểm số thang 100 phải nằm trong khoảng 0 đến 100.' });
       return;
     }
-    let finalNumeric: number | null = scoreCheck.value;
 
     let finalPoint: number | null = null;
     if (status === 'Completed' || status === 'Failed') {
@@ -912,16 +825,7 @@ app.patch(
       );
     }
 
-    const unreadCountRow = db
-      .prepare("SELECT COUNT(*) as cnt FROM academic_warnings WHERE student_id = ? AND warning_status = 'Active'")
-      .get(studentId) as { cnt: number };
-
-    res.json({
-      ok: true,
-      warning_id: warningId,
-      warning_status: warning.warning_status === 'Resolved' ? 'Resolved' : 'Read',
-      unreadWarningsCount: Number(unreadCountRow.cnt ?? 0),
-    });
+    res.json({ ok: true });
   }
 );
 
@@ -958,8 +862,8 @@ app.get('/api/lecturer/overview', requireAuth, requireLecturer, (req: Authentica
   const failedStudentsCount = enrolledRows.filter((r) => r.completion_status === 'Failed').length;
 
   const gradeBuckets = [
-    { group: 'A+ / A', count: 0 },
-    { group: 'B+ / B', count: 0 },
+    { group: 'A / A-', count: 0 },
+    { group: 'B+ / B / B-', count: 0 },
     { group: 'C+ / C', count: 0 },
     { group: 'D+ / D', count: 0 },
     { group: 'F', count: 0 },
@@ -971,8 +875,8 @@ app.get('/api/lecturer/overview', requireAuth, requireLecturer, (req: Authentica
     if (row.completion_status === 'Completed') passedCount += 1;
     if (row.completion_status === 'Failed') failedCount += 1;
     const lg = row.letter_grade;
-    if (lg === 'A+' || lg === 'A') gradeBuckets[0].count += 1;
-    else if (lg === 'B+' || lg === 'B') gradeBuckets[1].count += 1;
+    if (lg === 'A' || lg === 'A-') gradeBuckets[0].count += 1;
+    else if (lg === 'B+' || lg === 'B' || lg === 'B-') gradeBuckets[1].count += 1;
     else if (lg === 'C+' || lg === 'C') gradeBuckets[2].count += 1;
     else if (lg === 'D+' || lg === 'D') gradeBuckets[3].count += 1;
     else if (lg === 'F') gradeBuckets[4].count += 1;
@@ -1114,10 +1018,10 @@ app.put(
     const parseScore = (val: unknown, label: string): number | null => {
       if (val === null || val === undefined || val === '') return null;
       const n = Number(val);
-      if (!Number.isFinite(n) || n < 0 || n > 10) {
-        throw new Error(`${label} phải nằm trong khoảng từ 0.00 đến 10.00 (thang điểm 10).`);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        throw new Error(`${label} phải nằm trong khoảng từ 0 đến 100.`);
       }
-      return Math.round((n + Number.EPSILON) * 100) / 100;
+      return Math.round(n * 100) / 100;
     };
 
     try {
@@ -2315,10 +2219,8 @@ app.post(
     const expCredits = Number(expected_credits_per_semester ?? 15);
     const enrollYr = Number(enrollment_year ?? new Date().getFullYear());
 
-    if (!isValidIntegerCredit(reqCredits, 1, 300) || !isValidIntegerCredit(expCredits, 1, 60)) {
-      res.status(400).json({
-        error: 'Số tín chỉ yêu cầu và tín chỉ kỳ vọng mỗi học kỳ phải là số nguyên dương.',
-      });
+    if (reqCredits <= 0 || expCredits <= 0) {
+      res.status(400).json({ error: 'Số tín chỉ yêu cầu và tín chỉ kỳ vọng mỗi học kỳ phải là số dương.' });
       return;
     }
 
@@ -2398,8 +2300,8 @@ app.put(
     const advisorName = body.advisor_name?.trim() ?? student.advisor_name;
     const phone = body.phone?.trim() ?? student.phone;
 
-    if (!isValidIntegerCredit(requiredCredits, 1, 300) || !isValidIntegerCredit(expectedCredits, 1, 60)) {
-      res.status(400).json({ error: 'Số tín chỉ yêu cầu và tín chỉ kỳ vọng phải là số nguyên dương.' });
+    if (requiredCredits <= 0 || expectedCredits <= 0) {
+      res.status(400).json({ error: 'Số tín chỉ yêu cầu phải là số dương.' });
       return;
     }
 
@@ -2484,17 +2386,12 @@ app.post(
 
     const code = course_code?.trim().toUpperCase() ?? '';
     const name = course_name?.trim() ?? '';
-    const creditCheck = validateCourseCredit(credit_hours);
+    const credits = Number(credit_hours);
 
-    if (!code || !name) {
-      res.status(400).json({ error: 'Vui lòng nhập đầy đủ mã học phần và tên học phần.' });
+    if (!code || !name || !Number.isFinite(credits) || credits <= 0) {
+      res.status(400).json({ error: 'Vui lòng nhập mã học phần, tên học phần và số tín chỉ hợp lệ.' });
       return;
     }
-    if (!creditCheck.valid) {
-      res.status(400).json({ error: creditCheck.error });
-      return;
-    }
-    const credits = creditCheck.value;
 
     const dup = db.prepare('SELECT course_id FROM courses WHERE UPPER(course_code) = ?').get(code);
     if (dup) {
@@ -2543,20 +2440,12 @@ app.put(
 
     const code = (course_code ?? existing.course_code).trim().toUpperCase();
     const name = (course_name ?? existing.course_name).trim();
-    const creditCheck =
-      credit_hours !== undefined
-        ? validateCourseCredit(credit_hours)
-        : { valid: true, value: Math.max(1, Math.round(existing.credit_hours)) };
+    const credits = credit_hours !== undefined ? Number(credit_hours) : existing.credit_hours;
 
-    if (!code || !name) {
-      res.status(400).json({ error: 'Mã học phần và tên học phần phải hợp lệ.' });
+    if (!code || !name || !Number.isFinite(credits) || credits <= 0) {
+      res.status(400).json({ error: 'Mã học phần, tên học phần và số tín chỉ phải hợp lệ.' });
       return;
     }
-    if (!creditCheck.valid) {
-      res.status(400).json({ error: creditCheck.error });
-      return;
-    }
-    const credits = creditCheck.value;
 
     db.prepare(
       `UPDATE courses SET course_code = ?, course_name = ?, credit_hours = ?, department = ?, description = ?
@@ -2644,17 +2533,9 @@ app.put(
           !item.letter.trim() ||
           typeof item.point !== 'number' ||
           item.point < 0 ||
-          item.point > 4.0 ||
-          typeof item.minNumeric !== 'number' ||
-          typeof item.maxNumeric !== 'number' ||
-          item.minNumeric < 0 ||
-          item.maxNumeric > 10 ||
-          item.minNumeric > item.maxNumeric
+          item.point > 4.0
         ) {
-          res.status(400).json({
-            error:
-              'Mỗi dòng thang điểm cần có điểm chữ hợp lệ, điểm hệ 4 (0.00–4.00) và ngưỡng thang 10 hợp lệ (0.00–10.00).',
-          });
+          res.status(400).json({ error: 'Mỗi dòng thang điểm cần có điểm chữ hợp lệ và điểm hệ 4 từ 0.00 đến 4.00.' });
           return;
         }
       }
@@ -2907,340 +2788,15 @@ app.put(
   }
 );
 
-// --- TUITION & REAL QR PAYMENT ROUTES ---
-
-const MAX_QR_DATA_URL_CHARS = 3_500_000;
-const QR_DATA_URL_REGEX = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i;
-const LOCAL_QR_ASSET_REGEX = /^\/assets\/[A-Za-z0-9_/-]+\.(png|jpe?g|webp|gif)$/i;
-
-app.get(
-  '/api/students/:studentId/tuition',
-  requireAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    const { studentId } = req.params;
-    if (!assertStudentAccess(req, res, studentId)) return;
-    const student = getStudentById(studentId);
-    if (!student) {
-      res.status(404).json({ error: 'Không tìm thấy hồ sơ sinh viên.' });
-      return;
-    }
-    res.json(getStudentTuitionOverview(studentId));
-  }
-);
-
-app.post(
-  '/api/students/:studentId/tuition/pay',
-  requireAuth,
-  (req: AuthenticatedRequest, res: Response) => {
-    const { studentId } = req.params;
-    if (!assertStudentAccess(req, res, studentId)) return;
-    const student = getStudentById(studentId);
-    if (!student) {
-      res.status(404).json({ error: 'Không tìm thấy hồ sơ sinh viên.' });
-      return;
-    }
-
-    const { semester, academic_year, transfer_note } = req.body as {
-      semester?: string;
-      academic_year?: string;
-      transfer_note?: string;
-    };
-
-    const cleanSemester = semester?.trim();
-    const cleanYear = academic_year?.trim();
-    if (!cleanSemester || !cleanYear) {
-      res.status(400).json({ error: 'Vui lòng chọn học kỳ và năm học cần thanh toán.' });
-      return;
-    }
-
-    const currentOverview = getStudentTuitionOverview(studentId);
-    const targetInvoice = currentOverview.invoices.find(
-      (inv) => inv.semester === cleanSemester && inv.academic_year === cleanYear
-    );
-
-    if (!targetInvoice || targetInvoice.totalCredits <= 0) {
-      res.status(404).json({ error: 'Không tìm thấy hóa đơn học phí cho học kỳ đã chọn.' });
-      return;
-    }
-
-    if (targetInvoice.status === 'PAID') {
-      res.status(409).json({ error: 'Học kỳ này đã được thanh toán hoàn tất trước đó.' });
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const paymentId = `PAY-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-    const transactionRef = `UNI-QR-${Date.now().toString().slice(-6)}-${crypto
-      .randomBytes(2)
-      .toString('hex')
-      .toUpperCase()}`;
-    const resolvedNote =
-      transfer_note?.trim() ||
-      buildTuitionTransferNote(
-        currentOverview.config.transferNotePrefix,
-        studentId,
-        cleanSemester,
-        cleanYear
-      );
-
-    db.prepare(
-      `INSERT INTO tuition_payments (
-        payment_id, student_id, semester, academic_year, total_credits, unit_price, amount,
-        payment_method, transaction_ref, transfer_note, status, paid_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'QR_SCAN', ?, ?, 'PAID', ?, ?)`
-    ).run(
-      paymentId,
-      studentId,
-      cleanSemester,
-      cleanYear,
-      targetInvoice.totalCredits,
-      targetInvoice.unitPrice,
-      targetInvoice.totalAmount,
-      transactionRef,
-      resolvedNote,
-      now,
-      now
-    );
-
-    const payment = db
-      .prepare(
-        `SELECT p.*, s.full_name as student_name, s.major as student_major
-         FROM tuition_payments p
-         JOIN students s ON p.student_id = s.student_id
-         WHERE p.payment_id = ?`
-      )
-      .get(paymentId) as TuitionPaymentRecord;
-
-    logAcademicActivity(
-      studentId,
-      req.authUser!.user_id,
-      'THANH TOÁN HỌC PHÍ',
-      `Xác nhận thanh toán QR học phí ${cleanSemester} (${cleanYear}) — ${targetInvoice.totalCredits} TC (${targetInvoice.totalAmount.toLocaleString('vi-VN')} đ). Mã GD: ${transactionRef}.`
-    );
-
-    res.status(201).json({
-      ok: true,
-      payment,
-      overview: getStudentTuitionOverview(studentId),
-    });
-  }
-);
-
-app.get(
-  ['/api/training/tuition', '/api/admin/tuition'],
-  requireAuth,
-  requireTrainingDepartment,
-  (_req: AuthenticatedRequest, res: Response) => {
-    res.json(getTrainingTuitionOverview());
-  }
-);
-
-app.put(
-  ['/api/training/tuition-config', '/api/admin/tuition-config'],
-  requireAuth,
-  requireTrainingDepartment,
-  (req: AuthenticatedRequest, res: Response) => {
-    const current = getTuitionConfig();
-    const body = req.body as Partial<TuitionConfig>;
-
-    const nextPrice =
-      body.pricePerCredit !== undefined ? Number(body.pricePerCredit) : current.pricePerCredit;
-    if (!Number.isInteger(nextPrice) || nextPrice < 1000 || nextPrice > 50_000_000) {
-      res.status(400).json({
-        error: 'Đơn giá mỗi tín chỉ phải là số nguyên hợp lệ (từ 1.000 đ đến 50.000.000 đ).',
-      });
-      return;
-    }
-
-    const nextDebtThreshold =
-      body.debtAlertThreshold !== undefined
-        ? Number(body.debtAlertThreshold)
-        : current.debtAlertThreshold;
-    if (!Number.isInteger(nextDebtThreshold) || nextDebtThreshold < 0 || nextDebtThreshold > 500_000_000) {
-      res.status(400).json({
-        error: 'Ngưỡng cảnh báo công nợ phải là số nguyên không âm hợp lệ (tối đa 500.000.000 đ).',
-      });
-      return;
-    }
-
-    const nextDueDate =
-      body.paymentDueDate !== undefined ? body.paymentDueDate.trim() : current.paymentDueDate;
-    if (!isValidIsoDateYmd(nextDueDate)) {
-      res.status(400).json({
-        error: 'Ngày đến hạn thanh toán phải có định dạng hợp lệ YYYY-MM-DD.',
-      });
-      return;
-    }
-
-    const nextReminderDays =
-      body.dueReminderDays !== undefined ? Number(body.dueReminderDays) : current.dueReminderDays;
-    if (!Number.isInteger(nextReminderDays) || nextReminderDays < 1 || nextReminderDays > 180) {
-      res.status(400).json({
-        error: 'Số ngày nhắc trước hạn phải là số nguyên từ 1 đến 180 ngày.',
-      });
-      return;
-    }
-
-    const nextBankName = (body.bankName ?? current.bankName).trim();
-    const nextAccountNumber = (body.accountNumber ?? current.accountNumber).trim();
-    const nextAccountHolder = (body.accountHolder ?? current.accountHolder).trim();
-    const nextPrefix = (body.transferNotePrefix ?? current.transferNotePrefix)
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9_-]/g, '');
-
-    if (!nextBankName || !nextAccountNumber || !nextAccountHolder || !nextPrefix) {
-      res.status(400).json({
-        error: 'Vui lòng điền đầy đủ tên ngân hàng, số tài khoản, chủ tài khoản và tiền tố nội dung.',
-      });
-      return;
-    }
-
-    let nextQrImage: string | null = current.qrImageDataUrl;
-    if (body.qrImageDataUrl !== undefined) {
-      if (body.qrImageDataUrl === null || body.qrImageDataUrl === '') {
-        nextQrImage = DEFAULT_TUITION_CONFIG.qrImageDataUrl;
-      } else if (typeof body.qrImageDataUrl === 'string') {
-        const trimmed = body.qrImageDataUrl.trim();
-        if (trimmed.length > MAX_QR_DATA_URL_CHARS) {
-          res.status(400).json({
-            error: 'Ảnh mã QR quá lớn. Vui lòng chọn ảnh dung lượng tối đa 2.5MB.',
-          });
-          return;
-        }
-        if (!QR_DATA_URL_REGEX.test(trimmed) && !LOCAL_QR_ASSET_REGEX.test(trimmed)) {
-          res.status(400).json({
-            error: 'Định dạng ảnh mã QR không hợp lệ. Chỉ chấp nhận PNG, JPG, WEBP hoặc GIF.',
-          });
-          return;
-        }
-        nextQrImage = trimmed;
-      } else {
-        res.status(400).json({ error: 'Dữ liệu ảnh QR không hợp lệ.' });
-        return;
-      }
-    }
-
-    const now = new Date().toISOString();
-    const updatedConfig: TuitionConfig = {
-      pricePerCredit: nextPrice,
-      debtAlertThreshold: nextDebtThreshold,
-      paymentDueDate: nextDueDate,
-      dueReminderDays: nextReminderDays,
-      bankName: nextBankName,
-      accountNumber: nextAccountNumber,
-      accountHolder: nextAccountHolder,
-      transferNotePrefix: nextPrefix,
-      qrImageDataUrl: nextQrImage,
-      updatedAt: now,
-    };
-
-    db.prepare(
-      `INSERT INTO academic_settings (setting_id, setting_name, setting_value, description, updated_at)
-       VALUES ('SET-TUITION-CONFIG', 'tuition_config', ?, ?, ?)
-       ON CONFLICT(setting_name) DO UPDATE SET
-         setting_value = excluded.setting_value,
-         updated_at = excluded.updated_at`
-    ).run(
-      JSON.stringify(updatedConfig),
-      'Đơn giá tín chỉ, thông tin ngân hàng và mã QR thu học phí chính thức của nhà trường',
-      now
-    );
-
-    logAcademicActivity(
-      null,
-      req.authUser!.user_id,
-      'CẤU HÌNH HỌC PHÍ & QR',
-      `Cập nhật đơn giá ${nextPrice.toLocaleString('vi-VN')} đ/TC, tài khoản ${nextAccountNumber}${nextQrImage ? ' và ảnh QR chính thức' : ''}.`
-    );
-
-    res.json({
-      ok: true,
-      config: updatedConfig,
-      overview: getTrainingTuitionOverview(),
-    });
-  }
-);
-
-app.delete(
-  ['/api/training/tuition/payments/:paymentId', '/api/admin/tuition/payments/:paymentId'],
-  requireAuth,
-  requireTrainingDepartment,
-  (req: AuthenticatedRequest, res: Response) => {
-    const { paymentId } = req.params;
-    const existing = db
-      .prepare('SELECT * FROM tuition_payments WHERE payment_id = ?')
-      .get(paymentId) as TuitionPaymentRecord | undefined;
-    if (!existing) {
-      res.status(404).json({ error: 'Không tìm thấy giao dịch thanh toán học phí.' });
-      return;
-    }
-
-    db.prepare('DELETE FROM tuition_payments WHERE payment_id = ?').run(paymentId);
-
-    logAcademicActivity(
-      existing.student_id,
-      req.authUser!.user_id,
-      'HOÀN TÁC GIAO DỊCH HỌC PHÍ',
-      `Phòng Đào tạo đã đặt lại trạng thái chưa thanh toán cho hóa đơn ${existing.semester} (${existing.academic_year}) — Mã GD ${existing.transaction_ref}.`
-    );
-
-    res.json({
-      ok: true,
-      overview: getTrainingTuitionOverview(),
-    });
-  }
-);
-
 // --- VITE DEV / PRODUCTION STATIC SERVER ---
 
-function resolveCliArg(flag: string): string | undefined {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === flag && args[i + 1]) {
-      return args[i + 1];
-    }
-    if (arg.startsWith(`${flag}=`)) {
-      return arg.slice(flag.length + 1);
-    }
-  }
-  return undefined;
-}
-
-function resolveServerPort(): number {
-  const cliPort = Number(resolveCliArg('--port'));
-  if (Number.isInteger(cliPort) && cliPort > 0) {
-    return cliPort;
-  }
-  const envPort = Number(process.env.PORT);
-  const nginxPort = Number(process.env.NGINX_PORT);
-  if (Number.isInteger(envPort) && envPort > 0 && envPort !== nginxPort) {
-    return envPort;
-  }
-  const defaultAppPort = Number(process.env.DEFAULT_APP_PORT);
-  if (Number.isInteger(defaultAppPort) && defaultAppPort > 0) {
-    return defaultAppPort;
-  }
-  return 3000;
-}
-
-function resolveServerHost(): string {
-  return resolveCliArg('--host') || process.env.HOST || '0.0.0.0';
-}
-
 async function startServer(): Promise<void> {
-  const PORT = resolveServerPort();
-  const HOST = resolveServerHost();
+  const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
-  const httpServer = http.createServer(app);
 
   if (!isProd) {
     const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === 'true' ? false : { server: httpServer },
-      },
+      server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -3257,22 +2813,9 @@ async function startServer(): Promise<void> {
     });
   }
 
-  httpServer.listen(PORT, HOST, () => {
-    console.log(`UniPortal Academic Portal listening on http://${HOST}:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`UniPortal Academic Portal listening on http://0.0.0.0:${PORT}`);
   });
-
-  const shutdown = (): void => {
-    try {
-      db.pragma('wal_checkpoint(TRUNCATE)');
-      db.close();
-    } catch {
-      // Ignore shutdown DB errors
-    }
-    httpServer.close(() => process.exit(0));
-  };
-
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
 }
 
 startServer().catch((err) => {

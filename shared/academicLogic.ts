@@ -261,33 +261,12 @@ export interface GpaCourseBreakdownItem {
   semester: string;
   academic_year: string;
   credit_hours: number;
-  numeric_grade: number | null;
   letter_grade: string | null;
   grade_point: number | null;
   weighted_points: number;
   completion_status: CompletionStatus;
   included_in_gpa: boolean;
   exclusion_reason: string | null;
-}
-
-export type AcademicReportType =
-  | 'SEMESTER_SUMMARY'
-  | 'ADVISORY_NOTICE'
-  | 'PROGRESS_REVIEW'
-  | 'OFFICIAL_TRANSCRIPT';
-
-export interface AcademicReportRecord {
-  report_id: string;
-  student_id: string | null;
-  title: string;
-  report_type: AcademicReportType;
-  semester: string;
-  academic_year: string;
-  summary: string;
-  content: string;
-  created_at: string;
-  is_read: boolean;
-  read_at: string | null;
 }
 
 export interface SemesterGpaSummary {
@@ -378,15 +357,16 @@ export interface AcademicActivityRecord {
 }
 
 export const DEFAULT_GRADING_SCALE: GradeScaleEntry[] = [
-  { letter: 'A+', point: 4.0, minNumeric: 9.5, maxNumeric: 10.0, passing: true },
-  { letter: 'A', point: 4.0, minNumeric: 8.5, maxNumeric: 9.49, passing: true },
-  { letter: 'B+', point: 3.5, minNumeric: 8.0, maxNumeric: 8.49, passing: true },
-  { letter: 'B', point: 3.0, minNumeric: 7.0, maxNumeric: 7.99, passing: true },
-  { letter: 'C+', point: 2.5, minNumeric: 6.5, maxNumeric: 6.99, passing: true },
-  { letter: 'C', point: 2.0, minNumeric: 5.5, maxNumeric: 6.49, passing: true },
-  { letter: 'D+', point: 1.5, minNumeric: 5.0, maxNumeric: 5.49, passing: true },
-  { letter: 'D', point: 1.0, minNumeric: 4.0, maxNumeric: 4.99, passing: true },
-  { letter: 'F', point: 0.0, minNumeric: 0.0, maxNumeric: 3.99, passing: false },
+  { letter: 'A', point: 4.0, minNumeric: 90, maxNumeric: 100, passing: true },
+  { letter: 'A-', point: 3.7, minNumeric: 85, maxNumeric: 89.99, passing: true },
+  { letter: 'B+', point: 3.5, minNumeric: 80, maxNumeric: 84.99, passing: true },
+  { letter: 'B', point: 3.0, minNumeric: 75, maxNumeric: 79.99, passing: true },
+  { letter: 'B-', point: 2.7, minNumeric: 70, maxNumeric: 74.99, passing: true },
+  { letter: 'C+', point: 2.5, minNumeric: 65, maxNumeric: 69.99, passing: true },
+  { letter: 'C', point: 2.0, minNumeric: 55, maxNumeric: 64.99, passing: true },
+  { letter: 'D+', point: 1.5, minNumeric: 50, maxNumeric: 54.99, passing: true },
+  { letter: 'D', point: 1.0, minNumeric: 40, maxNumeric: 49.99, passing: true },
+  { letter: 'F', point: 0.0, minNumeric: 0, maxNumeric: 39.99, passing: false },
 ];
 
 export const DEFAULT_CLASSIFICATION_BANDS: ClassificationBand[] = [
@@ -468,103 +448,6 @@ export function formatGpa(val: number | null | undefined): string {
     return '—';
   }
   return val.toFixed(2);
-}
-
-export function formatTenScale(val: number | null | undefined): string {
-  if (val === null || val === undefined || Number.isNaN(val)) {
-    return '—';
-  }
-  return `${Number(val.toFixed(2)).toString()} / 10`;
-}
-
-export function formatDualGrade(
-  numericGrade: number | null | undefined,
-  letterGrade: string | null | undefined,
-  gradePoint: number | null | undefined
-): string {
-  const tenPart =
-    numericGrade !== null && numericGrade !== undefined && !Number.isNaN(numericGrade)
-      ? `${Number(numericGrade.toFixed(2)).toString()} / 10`
-      : null;
-  const fourPart =
-    letterGrade && gradePoint !== null && gradePoint !== undefined && !Number.isNaN(gradePoint)
-      ? `${letterGrade} / ${gradePoint.toFixed(1)}`
-      : letterGrade ?? (gradePoint !== null && gradePoint !== undefined ? gradePoint.toFixed(2) : null);
-
-  if (tenPart && fourPart) return `${tenPart} · ${fourPart}`;
-  return tenPart || fourPart || '—';
-}
-
-export function isValidIntegerCredit(value: unknown, min = 1, max = 240): boolean {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) && Number.isInteger(n) && n >= min && n <= max;
-}
-
-export function validateCourseCredit(value: unknown): {
-  valid: boolean;
-  value: number;
-  error?: string;
-} {
-  const rawStr = typeof value === 'string' ? value.trim() : String(value ?? '');
-  if (!rawStr) {
-    return {
-      valid: false,
-      value: NaN,
-      error: 'Vui lòng nhập số tín chỉ (số nguyên dương ≥ 1).',
-    };
-  }
-  const n = Number(rawStr);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 240) {
-    return {
-      valid: false,
-      value: n,
-      error: 'Số tín chỉ phải là số nguyên dương (≥ 1, không chấp nhận số thập phân).',
-    };
-  }
-  return { valid: true, value: n };
-}
-
-export function validatePlannedCredits(value: unknown): {
-  valid: boolean;
-  value: number;
-  error?: string;
-} {
-  const rawStr = typeof value === 'string' ? value.trim() : String(value ?? '');
-  if (!rawStr) {
-    return {
-      valid: false,
-      value: NaN,
-      error: 'Vui lòng nhập số tín chỉ dự kiến (số nguyên dương).',
-    };
-  }
-  const n = Number(rawStr);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 300) {
-    return {
-      valid: false,
-      value: n,
-      error: 'Số tín chỉ dự kiến phải là số nguyên dương (≥ 1, không nhập số thập phân).',
-    };
-  }
-  return { valid: true, value: n };
-}
-
-export function validateScoreOnTenScale(value: unknown): {
-  valid: boolean;
-  value: number | null;
-  error?: string;
-} {
-  if (value === null || value === undefined || String(value).trim() === '') {
-    return { valid: true, value: null };
-  }
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0 || n > 10) {
-    return {
-      valid: false,
-      value: null,
-      error: 'Điểm thang 10 phải nằm trong khoảng từ 0.00 đến 10.00.',
-    };
-  }
-  return { valid: true, value: Math.round((n + Number.EPSILON) * 100) / 100 };
 }
 
 export function translateCompletionStatus(status: CompletionStatus): string {
@@ -812,7 +695,6 @@ export function calculateStudentAcademicSummary(
       semester: e.semester,
       academic_year: e.academic_year,
       credit_hours: e.credit_hours,
-      numeric_grade: e.numeric_grade,
       letter_grade: e.letter_grade,
       grade_point: item.effectivePoint,
       weighted_points: weighted,
@@ -990,7 +872,6 @@ export function calculateStudentAcademicSummary(
 export interface TargetGpaCalculationInput {
   currentCgpa: number;
   currentCredits: number;
-  currentWeightedPoints?: number;
   targetCgpa: number;
   futureCredits: number;
 }
@@ -1002,42 +883,23 @@ export interface TargetGpaCalculationResult {
   currentCredits: number;
   targetCgpa: number;
   futureCredits: number;
-  gpaGap: number | null;
   requiredFutureGpa: number | null;
   projectedFinalCgpa: number | null;
-  maxPossibleCgpa: number | null;
   feasibilityStatus: 'achieved' | 'achievable' | 'challenging' | 'impossible' | 'invalid';
-  feasibilityLabel:
-    | 'Achievable'
-    | 'Challenging'
-    | 'Not achievable under the current plan'
-    | 'Invalid input';
   statusTitle: string;
   explanation: string;
-}
-
-export interface TargetGpaScenario {
-  id: string;
-  label: string;
-  targetCgpa: number;
-  futureCredits: number;
-  result: TargetGpaCalculationResult;
 }
 
 export function calculateTargetGpaPlan(
   input: TargetGpaCalculationInput
 ): TargetGpaCalculationResult {
-  const { currentCgpa, currentCredits, currentWeightedPoints, targetCgpa, futureCredits } = input;
+  const { currentCgpa, currentCredits, targetCgpa, futureCredits } = input;
 
   if (
     Number.isNaN(currentCgpa) ||
     Number.isNaN(currentCredits) ||
     Number.isNaN(targetCgpa) ||
-    Number.isNaN(futureCredits) ||
-    !Number.isFinite(currentCgpa) ||
-    !Number.isFinite(currentCredits) ||
-    !Number.isFinite(targetCgpa) ||
-    !Number.isFinite(futureCredits)
+    Number.isNaN(futureCredits)
   ) {
     return {
       valid: false,
@@ -1046,12 +908,9 @@ export function calculateTargetGpaPlan(
       currentCredits,
       targetCgpa,
       futureCredits,
-      gpaGap: null,
       requiredFutureGpa: null,
       projectedFinalCgpa: null,
-      maxPossibleCgpa: null,
       feasibilityStatus: 'invalid',
-      feasibilityLabel: 'Invalid input',
       statusTitle: 'Dữ liệu chưa hợp lệ',
       explanation: 'Các giá trị GPA và số tín chỉ phải là số hợp lệ.',
     };
@@ -1065,180 +924,109 @@ export function calculateTargetGpaPlan(
       currentCredits,
       targetCgpa,
       futureCredits,
-      gpaGap: null,
       requiredFutureGpa: null,
       projectedFinalCgpa: null,
-      maxPossibleCgpa: null,
       feasibilityStatus: 'invalid',
-      feasibilityLabel: 'Invalid input',
       statusTitle: 'GPA vượt ngoài thang điểm 4.00',
       explanation: 'GPA hiện tại và GPA mục tiêu phải nằm trong thang điểm 0.00 – 4.00.',
     };
   }
 
-  if (!Number.isInteger(currentCredits) || currentCredits < 0) {
+  if (currentCredits < 0 || futureCredits < 0) {
     return {
       valid: false,
-      errorMessage: 'Số tín chỉ đã tích lũy phải là số nguyên lớn hơn hoặc bằng 0.',
+      errorMessage: 'Số tín chỉ không được mang giá trị âm.',
       currentCgpa,
       currentCredits,
       targetCgpa,
       futureCredits,
-      gpaGap: null,
       requiredFutureGpa: null,
       projectedFinalCgpa: null,
-      maxPossibleCgpa: null,
       feasibilityStatus: 'invalid',
-      feasibilityLabel: 'Invalid input',
-      statusTitle: 'Số tín chỉ đã tích lũy không hợp lệ',
-      explanation: 'Số tín chỉ đã tích lũy phải là số nguyên không âm.',
+      statusTitle: 'Số tín chỉ không hợp lệ',
+      explanation: 'Số tín chỉ đã tích lũy và tín chỉ dự kiến phải lớn hơn hoặc bằng 0.',
     };
   }
 
-  const plannedCheck = validatePlannedCredits(futureCredits);
-  if (!plannedCheck.valid) {
+  if (futureCredits === 0) {
     return {
       valid: false,
-      errorMessage: plannedCheck.error,
+      errorMessage: 'Số tín chỉ dự kiến trong tương lai phải lớn hơn 0 để lập kế hoạch.',
       currentCgpa,
       currentCredits,
       targetCgpa,
       futureCredits,
-      gpaGap: roundGpa(targetCgpa - currentCgpa),
       requiredFutureGpa: null,
       projectedFinalCgpa: null,
-      maxPossibleCgpa: null,
       feasibilityStatus: 'invalid',
-      feasibilityLabel: 'Invalid input',
-      statusTitle: 'Số tín chỉ dự kiến phải là số nguyên dương',
-      explanation:
-        plannedCheck.error ??
-        'Chỉ chấp nhận số tín chỉ dự kiến là số nguyên dương (≥ 1, không nhập số thập phân).',
+      statusTitle: 'Chưa có tín chỉ tương lai',
+      explanation: 'Cần tối thiểu 1 tín chỉ dự kiến để tính GPA trung bình cần đạt.',
     };
   }
-
-  const effectiveCurrentPoints =
-    currentWeightedPoints !== undefined && Number.isFinite(currentWeightedPoints)
-      ? currentWeightedPoints
-      : currentCgpa * currentCredits;
 
   const totalCredits = currentCredits + futureCredits;
-  const requiredRaw = (targetCgpa * totalCredits - effectiveCurrentPoints) / futureCredits;
+  const requiredRaw = (targetCgpa * totalCredits - currentCgpa * currentCredits) / futureCredits;
   const requiredRounded = roundGpa(requiredRaw);
-  const gpaGap = roundGpa(targetCgpa - currentCgpa);
-  const maxPossible = roundGpa((effectiveCurrentPoints + 4.0 * futureCredits) / totalCredits);
 
-  if (requiredRaw > 4.0001) {
+  if (requiredRaw > 4.0) {
+    const maxPossible = roundGpa((currentCgpa * currentCredits + 4.0 * futureCredits) / totalCredits);
     return {
       valid: true,
-      currentCgpa: roundGpa(currentCgpa),
+      currentCgpa,
       currentCredits,
-      targetCgpa: roundGpa(targetCgpa),
+      targetCgpa,
       futureCredits,
-      gpaGap,
       requiredFutureGpa: requiredRounded,
       projectedFinalCgpa: maxPossible,
-      maxPossibleCgpa: maxPossible,
       feasibilityStatus: 'impossible',
-      feasibilityLabel: 'Not achievable under the current plan',
-      statusTitle: 'Không khả thi với kế hoạch hiện tại',
-      explanation: `Với ${futureCredits} tín chỉ sắp tới, bạn cần trung bình ${requiredRounded.toFixed(2)}/4.00 — vượt trần 4.00. Ngay cả khi đạt 4.00 tất cả học phần này, GPA tích lũy tối đa đạt ${maxPossible.toFixed(2)}.`,
+      statusTitle: 'Mục tiêu không khả thi về mặt toán học',
+      explanation: `Để đạt GPA tích lũy ${targetCgpa.toFixed(2)}, bạn cần đạt trung bình ${requiredRounded.toFixed(2)} trong ${futureCredits} tín chỉ sắp tới — vượt quá mức tối đa 4.00. Ngay cả khi đạt 4.00 ở tất cả học phần còn lại, GPA tối đa có thể đạt là ${maxPossible.toFixed(2)}.`,
     };
   }
 
-  const clampedRequired = Math.min(4.0, Math.max(0, requiredRounded));
-
   if (currentCgpa >= targetCgpa && requiredRaw <= currentCgpa) {
+    const clampedReq = Math.max(0, requiredRounded);
     return {
       valid: true,
-      currentCgpa: roundGpa(currentCgpa),
+      currentCgpa,
       currentCredits,
-      targetCgpa: roundGpa(targetCgpa),
+      targetCgpa,
       futureCredits,
-      gpaGap,
-      requiredFutureGpa: clampedRequired,
+      requiredFutureGpa: clampedReq,
       projectedFinalCgpa: roundGpa(targetCgpa),
-      maxPossibleCgpa: maxPossible,
       feasibilityStatus: 'achieved',
-      feasibilityLabel: 'Achievable',
-      statusTitle: 'Khả thi — Đã đạt ngưỡng mục tiêu',
-      explanation: `GPA hiện tại (${currentCgpa.toFixed(2)}) đã đạt hoặc vượt mục tiêu ${targetCgpa.toFixed(2)}. Bạn chỉ cần duy trì tối thiểu ${clampedRequired.toFixed(2)} trong ${futureCredits} tín chỉ sắp tới.`,
+      statusTitle: 'Đã đạt mức GPA mục tiêu',
+      explanation: `GPA hiện tại (${currentCgpa.toFixed(2)}) đã đạt hoặc vượt mục tiêu ${targetCgpa.toFixed(2)}. Bạn chỉ cần duy trì trung bình tối thiểu ${clampedReq.toFixed(2)} trong ${futureCredits} tín chỉ tiếp theo.`,
     };
   }
 
   if (requiredRaw >= 3.5) {
     return {
       valid: true,
-      currentCgpa: roundGpa(currentCgpa),
+      currentCgpa,
       currentCredits,
-      targetCgpa: roundGpa(targetCgpa),
+      targetCgpa,
       futureCredits,
-      gpaGap,
-      requiredFutureGpa: clampedRequired,
+      requiredFutureGpa: requiredRounded,
       projectedFinalCgpa: roundGpa(targetCgpa),
-      maxPossibleCgpa: maxPossible,
       feasibilityStatus: 'challenging',
-      feasibilityLabel: 'Challenging',
-      statusTitle: 'Khả thi nhưng đầy thử thách',
-      explanation: `Cần đạt trung bình ${clampedRequired.toFixed(2)}/4.00 (nhóm điểm A / A+, tương đương ≥ 8.0/10) trong ${futureCredits} tín chỉ sắp tới để tăng GPA thêm +${Math.max(0, gpaGap).toFixed(2)}.`,
+      statusTitle: 'Mục tiêu đầy thử thách',
+      explanation: `Bạn cần đạt GPA trung bình ${requiredRounded.toFixed(2)} trong ${futureCredits} tín chỉ sắp tới (chủ yếu điểm A- và A) để chạm mốc ${targetCgpa.toFixed(2)}.`,
     };
   }
 
   return {
     valid: true,
-    currentCgpa: roundGpa(currentCgpa),
+    currentCgpa,
     currentCredits,
-    targetCgpa: roundGpa(targetCgpa),
-    futureCredits,
-    gpaGap,
-    requiredFutureGpa: clampedRequired,
-    projectedFinalCgpa: roundGpa(targetCgpa),
-    maxPossibleCgpa: maxPossible,
-    feasibilityStatus: 'achievable',
-    feasibilityLabel: 'Achievable',
-    statusTitle: 'Hoàn toàn khả thi',
-    explanation: `Cần đạt trung bình ${clampedRequired.toFixed(2)}/4.00 trong ${futureCredits} tín chỉ sắp tới để đạt mục tiêu GPA ${targetCgpa.toFixed(2)}.`,
-  };
-}
-
-export function buildTargetGpaScenarios(params: {
-  currentCgpa: number;
-  currentCredits: number;
-  currentWeightedPoints?: number;
-  targetCgpa: number;
-  plannedCredits: number;
-}): TargetGpaScenario[] {
-  const { currentCgpa, currentCredits, currentWeightedPoints, targetCgpa, plannedCredits } = params;
-  const safePlanned =
-    Number.isInteger(plannedCredits) && plannedCredits >= 1 && plannedCredits <= 300
-      ? plannedCredits
-      : 12;
-
-  const creditSet = new Set<number>([safePlanned]);
-  const presets = safePlanned > 18
-    ? [Math.max(1, safePlanned - 6), safePlanned + 6]
-    : [6, 12, 15, 18];
-
-  for (const cr of presets) {
-    if (creditSet.size >= 3) break;
-    if (cr !== safePlanned) creditSet.add(cr);
-  }
-
-  const orderedCredits = Array.from(creditSet).slice(0, 3);
-
-  return orderedCredits.map((cr, idx) => ({
-    id: idx === 0 ? 'current' : `cr-${cr}`,
-    label: idx === 0 ? `Kế hoạch hiện tại (${cr} TC)` : `Phương án ${cr} tín chỉ`,
     targetCgpa,
-    futureCredits: cr,
-    result: calculateTargetGpaPlan({
-      currentCgpa,
-      currentCredits,
-      currentWeightedPoints,
-      targetCgpa,
-      futureCredits: cr,
-    }),
-  }));
+    futureCredits,
+    requiredFutureGpa: Math.max(0, requiredRounded),
+    projectedFinalCgpa: roundGpa(targetCgpa),
+    feasibilityStatus: 'achievable',
+    statusTitle: 'Mục tiêu hoàn toàn khả thi',
+    explanation: `Bạn cần đạt GPA trung bình ${Math.max(0, requiredRounded).toFixed(2)} trong ${futureCredits} tín chỉ sắp tới để đạt mục tiêu GPA ${targetCgpa.toFixed(2)}.`,
+  };
 }
 
 export function evaluateStudentWarnings(
@@ -1349,242 +1137,3 @@ export function evaluateStudentWarnings(
 
   return candidates;
 }
-
-// --- TUITION & REAL QR PAYMENT MODULE ---
-
-export interface TuitionConfig {
-  pricePerCredit: number;
-  debtAlertThreshold: number;
-  paymentDueDate: string;
-  dueReminderDays: number;
-  bankName: string;
-  accountNumber: string;
-  accountHolder: string;
-  transferNotePrefix: string;
-  qrImageDataUrl: string | null;
-  updatedAt?: string;
-}
-
-export const DEFAULT_TUITION_CONFIG: TuitionConfig = {
-  pricePerCredit: 850000,
-  debtAlertThreshold: 5000000,
-  paymentDueDate: '2026-11-25',
-  dueReminderDays: 14,
-  bankName: 'Ngân hàng TMCP Kỹ Thương Việt Nam (Techcombank)',
-  accountNumber: '1029384756',
-  accountHolder: 'TRƯỜNG ĐẠI HỌC UNIPORTAL',
-  transferNotePrefix: 'HOCPHI',
-  qrImageDataUrl: '/assets/aistudio/image_901c93aa.png',
-};
-
-export type TuitionPaymentStatus = 'PAID' | 'PENDING_CONFIRMATION';
-
-export interface TuitionPaymentRecord {
-  payment_id: string;
-  student_id: string;
-  student_name?: string;
-  student_major?: string;
-  semester: string;
-  academic_year: string;
-  total_credits: number;
-  unit_price: number;
-  amount: number;
-  payment_method: string;
-  transaction_ref: string;
-  transfer_note: string;
-  status: TuitionPaymentStatus;
-  paid_at: string;
-  created_at: string;
-}
-
-export interface TuitionCourseLine {
-  enrollment_id: string;
-  course_code: string;
-  course_name: string;
-  credit_hours: number;
-  completion_status: CompletionStatus;
-  is_repeated: number;
-  fee: number;
-}
-
-export interface StudentTuitionInvoice {
-  key: string;
-  semester: string;
-  academic_year: string;
-  totalCredits: number;
-  unitPrice: number;
-  totalAmount: number;
-  courses: TuitionCourseLine[];
-  status: 'PAID' | 'UNPAID';
-  payment: TuitionPaymentRecord | null;
-  transferNote: string;
-}
-
-export function formatVnd(amount: number): string {
-  const safe = Number.isFinite(amount) ? Math.round(amount) : 0;
-  return `${safe.toLocaleString('vi-VN')} đ`;
-}
-
-function compactSemesterCode(semester: string): string {
-  const s = semester.toLowerCase();
-  if (s.includes('hè') || s.includes('he') || s.includes('summer')) return 'HKHE';
-  const match = s.match(/(\d+)/);
-  if (match) return `HK${match[1]}`;
-  return 'HK';
-}
-
-export function buildTuitionTransferNote(
-  prefix: string,
-  studentId: string,
-  semester: string,
-  academicYear: string
-): string {
-  const cleanPrefix = (prefix || 'HOCPHI').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '') || 'HOCPHI';
-  const semCode = compactSemesterCode(semester);
-  const yearCode = academicYear.replace(/\s+/g, '');
-  return `${cleanPrefix} ${studentId} ${semCode} ${yearCode}`.trim();
-}
-
-export function buildStudentTuitionInvoices(
-  studentId: string,
-  enrollments: EnrollmentRecord[],
-  payments: TuitionPaymentRecord[],
-  config: TuitionConfig
-): StudentTuitionInvoice[] {
-  const paymentMap = new Map<string, TuitionPaymentRecord>();
-  for (const p of payments) {
-    if (p.student_id === studentId && p.status === 'PAID') {
-      paymentMap.set(`${p.academic_year}::${p.semester}`, p);
-    }
-  }
-
-  const termGroups = new Map<
-    string,
-    {
-      semester: string;
-      academic_year: string;
-      items: EnrollmentRecord[];
-    }
-  >();
-
-  for (const e of enrollments) {
-    if (e.completion_status === 'Withdrawn') continue;
-    const key = `${e.academic_year}::${e.semester}`;
-    const existing = termGroups.get(key);
-    if (existing) {
-      existing.items.push(e);
-    } else {
-      termGroups.set(key, {
-        semester: e.semester,
-        academic_year: e.academic_year,
-        items: [e],
-      });
-    }
-  }
-
-  const sortedTerms = Array.from(termGroups.values()).sort(compareTermChronology);
-
-  return sortedTerms.map((term) => {
-    const key = `${term.academic_year}::${term.semester}`;
-    const payment = paymentMap.get(key) ?? null;
-    const unitPrice = payment?.unit_price ?? config.pricePerCredit;
-
-    const courses: TuitionCourseLine[] = term.items.map((item) => {
-      const credits = Math.max(1, Math.round(Number(item.credit_hours) || 1));
-      return {
-        enrollment_id: item.enrollment_id,
-        course_code: item.course_code ?? item.course_id,
-        course_name: item.course_name ?? item.course_id,
-        credit_hours: credits,
-        completion_status: item.completion_status,
-        is_repeated: item.is_repeated,
-        fee: credits * unitPrice,
-      };
-    });
-
-    const totalCredits = courses.reduce((sum, c) => sum + c.credit_hours, 0);
-    const totalAmount = payment ? payment.amount : totalCredits * unitPrice;
-
-    return {
-      key,
-      semester: term.semester,
-      academic_year: term.academic_year,
-      totalCredits,
-      unitPrice,
-      totalAmount,
-      courses,
-      status: payment ? 'PAID' : 'UNPAID',
-      payment,
-      transferNote:
-        payment?.transfer_note ??
-        buildTuitionTransferNote(
-          config.transferNotePrefix,
-          studentId,
-          term.semester,
-          term.academic_year
-        ),
-    };
-  });
-}
-
-export interface TuitionDueSummary {
-  semester: string;
-  academic_year: string;
-  amount: number;
-  dueDate: string;
-  daysRemaining: number;
-  isDueSoon: boolean;
-  isOverdue: boolean;
-}
-
-export function isValidIsoDateYmd(value: string | null | undefined): value is string {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [y, m, d] = value.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return (
-    dt.getUTCFullYear() === y &&
-    dt.getUTCMonth() === m - 1 &&
-    dt.getUTCDate() === d
-  );
-}
-
-export function formatDisplayDate(isoDate: string): string {
-  if (!isValidIsoDateYmd(isoDate)) return isoDate;
-  const [y, m, d] = isoDate.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-export function computeTuitionDueSummary(
-  invoices: StudentTuitionInvoice[],
-  config: TuitionConfig,
-  todayIsoDate: string = new Date().toISOString().slice(0, 10)
-): TuitionDueSummary | null {
-  const unpaid = invoices.find((inv) => inv.status === 'UNPAID' && inv.totalAmount > 0);
-  if (!unpaid) return null;
-
-  const dueDate = isValidIsoDateYmd(config.paymentDueDate)
-    ? config.paymentDueDate
-    : DEFAULT_TUITION_CONFIG.paymentDueDate;
-
-  const [dy, dm, dd] = dueDate.split('-').map(Number);
-  const [ty, tm, td] = todayIsoDate.split('-').map(Number);
-  const dueUtc = Date.UTC(dy, dm - 1, dd);
-  const todayUtc = Date.UTC(ty, tm - 1, td);
-  const daysRemaining = Math.round((dueUtc - todayUtc) / 86_400_000);
-  const reminderWindow =
-    Number.isInteger(config.dueReminderDays) && config.dueReminderDays >= 1
-      ? config.dueReminderDays
-      : DEFAULT_TUITION_CONFIG.dueReminderDays;
-
-  return {
-    semester: unpaid.semester,
-    academic_year: unpaid.academic_year,
-    amount: unpaid.totalAmount,
-    dueDate,
-    daysRemaining,
-    isOverdue: daysRemaining < 0,
-    isDueSoon: daysRemaining >= 0 && daysRemaining <= reminderWindow,
-  };
-}
-
-

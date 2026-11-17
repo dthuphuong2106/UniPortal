@@ -221,7 +221,7 @@ export function ToastBanner({
   onClose,
 }: {
   message: string | null;
-  tone?: 'success' | 'error' | 'info' | 'warning';
+  tone?: 'success' | 'error' | 'info';
   onClose: () => void;
 }) {
   if (!message) return null;
@@ -229,7 +229,6 @@ export function ToastBanner({
     success: 'bg-[#20243A] text-white border-[#36B37E]/40',
     error: 'bg-[#C83D4C] text-white border-[#EF6472]/50',
     info: 'bg-[#6558E8] text-white border-[#8174F7]/50',
-    warning: 'bg-[#20243A] text-white border-[#F5AE48]/60',
   };
   return (
     <div className="fixed bottom-5 right-5 z-50 max-w-sm no-print">
@@ -238,8 +237,6 @@ export function ToastBanner({
       >
         {tone === 'error' ? (
           <AlertCircle className="w-4 h-4 shrink-0" />
-        ) : tone === 'warning' ? (
-          <AlertTriangle className="w-4 h-4 shrink-0 text-[#F5AE48]" />
         ) : (
           <CheckCircle2 className="w-4 h-4 shrink-0 text-[#36B37E]" />
         )}

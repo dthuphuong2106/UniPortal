@@ -16,9 +16,7 @@ import {
 } from 'lucide-react';
 import {
   ClassSectionRecord,
-  formatDualGrade,
   formatGpa,
-  formatTenScale,
   LecturerProfile,
   translateCompletionStatus,
   translateGradeWorkflowStatus,
@@ -855,8 +853,8 @@ export function TrainingSectionsAndAssignmentsView({
                       <td className="py-2.5 px-4 font-medium text-[#20243A]">
                         {e.student_name ?? e.student_id}
                       </td>
-                      <td className="py-2.5 px-4 text-center font-mono text-xs">
-                        {formatDualGrade(e.numeric_grade, e.letter_grade, e.grade_point)}
+                      <td className="py-2.5 px-4 text-center font-mono">
+                        {e.letter_grade ?? '—'}
                       </td>
                       <td className="py-2.5 px-4 text-xs">
                         {translateCompletionStatus(e.completion_status)}
@@ -1180,8 +1178,8 @@ export function TrainingGradeApprovalsView({
                         <th className="py-2.5 px-4 text-center">BT</th>
                         <th className="py-2.5 px-4 text-center">GK</th>
                         <th className="py-2.5 px-4 text-center">CK</th>
-                        <th className="py-2.5 px-4 text-right">Tổng kết (Hệ 10)</th>
-                        <th className="py-2.5 px-4 text-center">Điểm chữ · Hệ 4</th>
+                        <th className="py-2.5 px-4 text-right">Tổng kết</th>
+                        <th className="py-2.5 px-4 text-center">Điểm chữ</th>
                         <th className="py-2.5 px-4">Trạng thái</th>
                       </tr>
                     </thead>
@@ -1207,12 +1205,10 @@ export function TrainingGradeApprovalsView({
                             {e.final_score ?? '—'}
                           </td>
                           <td className="py-2.5 px-4 text-right font-mono font-bold">
-                            {formatTenScale(e.numeric_grade)}
+                            {e.numeric_grade !== null ? e.numeric_grade.toFixed(1) : '—'}
                           </td>
-                          <td className="py-2.5 px-4 text-center font-mono font-bold text-[#6558E8] whitespace-nowrap">
-                            {e.letter_grade
-                              ? `${e.letter_grade}${e.grade_point !== null ? ` / ${e.grade_point.toFixed(1)}` : ''}`
-                              : '—'}
+                          <td className="py-2.5 px-4 text-center font-mono font-bold text-[#6558E8]">
+                            {e.letter_grade ?? '—'}
                           </td>
                           <td className="py-2.5 px-4 text-xs">
                             {translateCompletionStatus(e.completion_status)}
