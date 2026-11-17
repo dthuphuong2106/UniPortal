@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  CreditCard,
   FileSpreadsheet,
   GraduationCap,
   History,
@@ -19,6 +20,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  QrCode,
   Settings,
   ShieldAlert,
   Sliders,
@@ -46,6 +48,7 @@ export type StudentNavKey =
   | 'student_history'
   | 'student_progress'
   | 'student_planner'
+  | 'student_tuition'
   | 'student_warnings'
   | 'student_reports'
   | 'student_profile';
@@ -69,6 +72,7 @@ export type TrainingNavKey =
   | 'td_terms'
   | 'td_results'
   | 'td_approvals'
+  | 'td_tuition'
   | 'td_warnings'
   | 'td_grade_rules'
   | 'td_settings'
@@ -98,6 +102,7 @@ interface ShellLayoutProps {
   activeWarnings?: AcademicWarningRecord[];
   lecturerNotifications?: LecturerNotificationItem[];
   pendingApprovalCount?: number;
+  unreadReportsCount?: number;
   onMarkWarningRead?: (warningId: string) => void;
   children: React.ReactNode;
 }
@@ -111,6 +116,7 @@ export function ShellLayout({
   activeWarnings = [],
   lecturerNotifications = [],
   pendingApprovalCount = 0,
+  unreadReportsCount = 0,
   onMarkWarningRead,
   children,
 }: ShellLayoutProps) {
@@ -155,13 +161,19 @@ export function ShellLayout({
         { key: 'student_history', label: 'Lịch sử học tập', icon: History },
         { key: 'student_progress', label: 'Tiến độ tốt nghiệp', icon: TrendingUp },
         { key: 'student_planner', label: 'Kế hoạch GPA mục tiêu', icon: Target },
+        { key: 'student_tuition', label: 'Học phí & Thanh toán QR', icon: QrCode },
         {
           key: 'student_warnings',
           label: 'Cảnh báo học vụ',
           icon: AlertTriangle,
           badgeCount: unresolvedWarningsCount > 0 ? unresolvedWarningsCount : undefined,
         },
-        { key: 'student_reports', label: 'Báo cáo học tập', icon: BarChart3 },
+        {
+          key: 'student_reports',
+          label: 'Báo cáo học tập',
+          icon: BarChart3,
+          badgeCount: unreadReportsCount > 0 ? unreadReportsCount : undefined,
+        },
         { key: 'student_profile', label: 'Hồ sơ cá nhân', icon: User },
       ],
     },
@@ -221,6 +233,7 @@ export function ShellLayout({
     {
       title: 'Hệ thống',
       items: [
+        { key: 'td_tuition', label: 'Quản lý học phí & QR', icon: CreditCard },
         { key: 'td_grade_rules', label: 'Quy chế điểm', icon: Sliders },
         { key: 'td_settings', label: 'Cấu hình học vụ', icon: Settings },
         { key: 'td_reports', label: 'Báo cáo thống kê', icon: BarChart3 },

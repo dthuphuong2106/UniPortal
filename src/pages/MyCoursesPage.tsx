@@ -15,12 +15,16 @@ import {
 import {
   CompletionStatus,
   EnrollmentRecord,
+  formatDualGrade,
   formatGpa,
+  formatTenScale,
   roundGpa,
   resolveGradeFromScale,
   resolveLetterFromNumeric,
   semesterSortRank,
   translateCompletionStatus,
+  validateCourseCredit,
+  validateScoreOnTenScale,
 } from '../../shared/academicLogic.ts';
 import { api, CatalogCourse, StudentOverviewResponse } from '../services/api.ts';
 import { ConfirmModal, SemanticStatusBadge, SemanticTone } from '../components/PortalUI.tsx';
@@ -231,7 +235,7 @@ export function MyCoursesPage({
     setForm((prev) => {
       const next = { ...prev, numeric_grade: val };
       const num = Number(val);
-      if (val.trim() !== '' && Number.isFinite(num) && num >= 0 && num <= 100) {
+      if (val.trim() !== '' && Number.isFinite(num) && num >= 0 && num <= 10) {
         const resolved = resolveLetterFromNumeric(num, settings.gradingScale);
         if (resolved) {
           next.letter_grade = resolved.letter;
@@ -248,7 +252,7 @@ export function MyCoursesPage({
 
     const code = form.course_code.trim().toUpperCase();
     const name = form.course_name.trim();
-    const credits = Number(form.credit_hours);
+    const creditCheck = validateCourseCredit(form.credit_hours);
 
     if (!code) {
       setFormError('Vui lòng nhập mã học phần.');
@@ -258,10 +262,11 @@ export function MyCoursesPage({
       setFormError('Vui lòng nhập tên học phần.');
       return;
     }
-    if (!Number.isFinite(credits) || credits <= 0 || credits > 12) {
-      setFormError('Số tín chỉ phải nằm trong khoảng từ 0.5 đến 12.');
+    if (!creditCheck.valid) {
+      setFormError(creditCheck.error ?? 'Số tín chỉ phải là số nguyên dương từ 1 đến 12.');
       return;
     }
+    const credits = creditCheck.value;
     if (!form.semester.trim() || !form.academic_year.trim()) {
       setFormError('Vui lòng nhập học kỳ và năm học.');
       return;
@@ -271,16 +276,12 @@ export function MyCoursesPage({
       form.completion_status === 'Completed' || form.completion_status === 'Failed';
 
     let finalLetter: string | null = form.letter_grade.trim().toUpperCase() || null;
-    let finalNumeric: number | null =
-      form.numeric_grade.trim() !== '' ? Number(form.numeric_grade) : null;
-
-    if (
-      finalNumeric !== null &&
-      (!Number.isFinite(finalNumeric) || finalNumeric < 0 || finalNumeric > 100)
-    ) {
-      setFormError('Điểm số (thang 100) phải nằm trong khoảng 0 đến 100.');
+    const scoreCheck = validateScoreOnTenScale(form.numeric_grade);
+    if (!scoreCheck.valid) {
+      setFormError(scoreCheck.error ?? 'Điểm số (thang 10) phải nằm trong khoảng 0.00 đến 10.00.');
       return;
     }
+    let finalNumeric: number | null = scoreCheck.value;
 
     if (isFinalized) {
       const match = resolveGradeFromScale(finalLetter, settings.gradingScale);
@@ -550,16 +551,11 @@ export function MyCoursesPage({
               </div>
 
               <div className="pt-3.5 border-t border-[#ECEEF5] flex items-center justify-between gap-3">
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-baseline gap-2 flex-wrap">
                   <span className="text-xs text-[#858BA3]">Kết quả:</span>
-                  <span className="font-mono font-bold text-base text-[#20243A]">
-                    {rec.letter_grade ?? '—'}
+                  <span className="font-mono font-bold text-sm text-[#20243A] tabular-nums">
+                    {formatDualGrade(rec.numeric_grade, rec.letter_grade, rec.grade_point)}
                   </span>
-                  {rec.grade_point !== null && (
-                    <span className="font-mono text-xs text-[#6558E8] tabular-nums">
-                      ({rec.grade_point.toFixed(2)})
-                    </span>
-                  )}
                 </div>
 
                 <div className="inline-flex items-center gap-1">
@@ -611,6 +607,7 @@ export function MyCoursesPage({
                   <th className="py-3.5 px-5">Học kỳ</th>
                   <th className="py-3.5 px-5">Năm học</th>
                   <th className="py-3.5 px-5 text-right">Tín chỉ</th>
+                  <th className="py-3.5 px-5 text-right">Điểm hệ 10</th>
                   <th className="py-3.5 px-5 text-center">Điểm chữ</th>
                   <th className="py-3.5 px-5 text-right">Điểm hệ 4</th>
                   <th className="py-3.5 px-5">Trạng thái</th>
@@ -637,18 +634,23 @@ export function MyCoursesPage({
                         </div>
                       )}
                     </td>
-                    <td className="py-3.5 px-5 text-[#555C75] whitespace-nowrap">{rec.semester}</td>
+                    <td className="py-3.5 px-5 text-right font-mono tabular-nums text-[#555C75]">
+                      {rec.semester}
+                    </td>
                     <td className="py-3.5 px-5 font-mono text-[#858BA3] whitespace-nowrap tabular-nums">
                       {rec.academic_year}
                     </td>
                     <td className="py-3.5 px-5 text-right font-mono tabular-nums text-[#20243A]">
                       {rec.credit_hours}
                     </td>
+                    <td className="py-3.5 px-5 text-right font-mono tabular-nums text-[#555C75]">
+                      {formatTenScale(rec.numeric_grade)}
+                    </td>
                     <td className="py-3.5 px-5 text-center font-mono font-semibold text-[#20243A]">
                       {rec.letter_grade ?? '—'}
                     </td>
                     <td className="py-3.5 px-5 text-right font-mono tabular-nums text-[#20243A]">
-                      {rec.grade_point !== null ? rec.grade_point.toFixed(2) : '—'}
+                      {rec.grade_point !== null ? rec.grade_point.toFixed(1) : '—'}
                     </td>
                     <td className="py-3.5 px-5">
                       <SemanticStatusBadge
@@ -816,15 +818,19 @@ export function MyCoursesPage({
                     htmlFor="course-credits"
                     className="block text-xs font-medium text-[#20243A] mb-1.5"
                   >
-                    Số tín chỉ *
+                    Số tín chỉ (số nguyên) *
                   </label>
                   <input
                     id="course-credits"
                     type="number"
-                    step="0.5"
-                    min="0.5"
-                    max="12"
+                    step="1"
+                    min="1"
                     value={form.credit_hours}
+                    onKeyDown={(e) => {
+                      if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
                     onChange={(e) => setForm({ ...form, credit_hours: e.target.value })}
                     className="w-full px-3.5 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
                   />
@@ -977,21 +983,21 @@ export function MyCoursesPage({
                     htmlFor="course-numeric"
                     className="block text-xs font-medium text-[#20243A] mb-1.5"
                   >
-                    Điểm số (0–100)
+                    Điểm hệ 10 (0–10)
                   </label>
                   <input
                     id="course-numeric"
                     type="number"
                     min="0"
-                    max="100"
-                    step="0.5"
+                    max="10"
+                    step="0.1"
                     disabled={
                       form.completion_status === 'In Progress' ||
                       form.completion_status === 'Withdrawn'
                     }
                     value={form.numeric_grade}
                     onChange={(e) => handleNumericChange(e.target.value)}
-                    placeholder="Không bắt buộc"
+                    placeholder="VD: 8.5"
                     className="w-full px-3 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl disabled:bg-[#F8F9FD]"
                   />
                 </div>
@@ -1080,25 +1086,15 @@ export function MyCoursesPage({
                 <dd className="font-mono font-semibold text-[#20243A]">
                   {viewingRecord.letter_grade ?? '—'} (
                   {viewingRecord.grade_point !== null
-                    ? viewingRecord.grade_point.toFixed(2)
+                    ? viewingRecord.grade_point.toFixed(1)
                     : '—'}
                   )
                 </dd>
               </div>
-              <div className="flex justify-between py-1.5 border-b border-[#ECEEF5]">
-                <dt className="text-[#858BA3]">Điểm hệ 100</dt>
-                <dd className="font-mono text-[#20243A]">
-                  {viewingRecord.numeric_grade !== null
-                    ? `${viewingRecord.numeric_grade} / 100`
-                    : '—'}
-                </dd>
-              </div>
               <div className="flex justify-between py-1.5">
-                <dt className="text-[#858BA3]">Điểm trọng số</dt>
-                <dd className="font-mono font-bold text-[#6558E8]">
-                  {viewingRecord.grade_point !== null
-                    ? (viewingRecord.credit_hours * viewingRecord.grade_point).toFixed(2)
-                    : 'Không tính vào GPA'}
+                <dt className="text-[#858BA3]">Điểm hệ 10</dt>
+                <dd className="font-mono text-[#20243A]">
+                  {formatTenScale(viewingRecord.numeric_grade)}
                 </dd>
               </div>
             </dl>

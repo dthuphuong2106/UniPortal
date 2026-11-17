@@ -1,6 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { CheckCircle2, Download, FileText, XCircle } from 'lucide-react';
+import {
+  BellDot,
+  CheckCircle2,
+  Download,
+  FileText,
+  Inbox,
+  MailOpen,
+  XCircle,
+} from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -14,13 +22,16 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  AcademicReportRecord,
+  AcademicReportType,
+  formatDualGrade,
   formatGpa,
   translateCompletionStatus,
   translateSeverity,
   translateWarningStatus,
 } from '../../shared/academicLogic.ts';
-import { StudentOverviewResponse } from '../services/api.ts';
-import { SemanticStatusBadge } from '../components/PortalUI.tsx';
+import { api, MarkReportReadResponse, StudentOverviewResponse } from '../services/api.ts';
+import { SemanticStatusBadge, SemanticTone } from '../components/PortalUI.tsx';
 
 function toPdfSafeText(input: string): string {
   return input
@@ -30,11 +41,96 @@ function toPdfSafeText(input: string): string {
     .replace(/Đ/g, 'D');
 }
 
-export function AcademicReportsPage({ overview }: { overview: StudentOverviewResponse }) {
+function translateReportType(type: AcademicReportType): string {
+  switch (type) {
+    case 'SEMESTER_SUMMARY':
+      return 'Tổng kết học kỳ';
+    case 'ADVISORY_NOTICE':
+      return 'Thông báo học vụ';
+    case 'PROGRESS_REVIEW':
+      return 'Đánh giá tiến độ';
+    case 'OFFICIAL_TRANSCRIPT':
+      return 'Bảng điểm chính thức';
+    default:
+      return type;
+  }
+}
+
+function reportTypeTone(type: AcademicReportType): SemanticTone {
+  switch (type) {
+    case 'ADVISORY_NOTICE':
+      return 'warning';
+    case 'OFFICIAL_TRANSCRIPT':
+      return 'success';
+    case 'PROGRESS_REVIEW':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+}
+
+export function AcademicReportsPage({
+  overview,
+  readOnly = false,
+  onMarkReportRead,
+}: {
+  overview: StudentOverviewResponse;
+  readOnly?: boolean;
+  onMarkReportRead?: (reportId: string, response: MarkReportReadResponse) => void;
+}) {
   const { student, summary, enrollments, warnings, settings } = overview;
+  const reports: AcademicReportRecord[] = overview.reports ?? [];
+  const unreadReportsCount =
+    overview.unreadReportsCount ?? reports.filter((r) => !r.is_read).length;
 
   const [yearFilter, setYearFilter] = useState('ALL');
   const [semesterFilter, setSemesterFilter] = useState('ALL');
+  const [readFilter, setReadFilter] = useState<'ALL' | 'UNREAD' | 'READ'>('ALL');
+  const [selectedReportId, setSelectedReportId] = useState<string>(reports[0]?.report_id ?? '');
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  const filteredReports = useMemo(() => {
+    return reports.filter((r) => {
+      if (readFilter === 'UNREAD' && r.is_read) return false;
+      if (readFilter === 'READ' && !r.is_read) return false;
+      return true;
+    });
+  }, [reports, readFilter]);
+
+  useEffect(() => {
+    if (
+      filteredReports.length > 0 &&
+      !filteredReports.some((r) => r.report_id === selectedReportId)
+    ) {
+      setSelectedReportId(filteredReports[0].report_id);
+    }
+  }, [filteredReports, selectedReportId]);
+
+  const selectedReport = useMemo(
+    () =>
+      filteredReports.find((r) => r.report_id === selectedReportId) ??
+      reports.find((r) => r.report_id === selectedReportId) ??
+      filteredReports[0] ??
+      null,
+    [filteredReports, reports, selectedReportId]
+  );
+
+  const handleMarkReportRead = async (reportId: string) => {
+    if (readOnly || markingId) return;
+    setReportError(null);
+    setMarkingId(reportId);
+    try {
+      const response = await api.markReportRead(student.student_id, reportId);
+      onMarkReportRead?.(reportId, response);
+    } catch (err) {
+      setReportError(
+        err instanceof Error ? err.message : 'Không thể cập nhật trạng thái đã đọc báo cáo.'
+      );
+    } finally {
+      setMarkingId(null);
+    }
+  };
 
   const years = useMemo(
     () => Array.from(new Set(enrollments.map((e) => e.academic_year))).sort(),
@@ -194,7 +290,7 @@ export function AcademicReportsPage({ overview }: { overview: StudentOverviewRes
     }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
-    doc.text('BANG DIEM CHI TIET HOC PHAN', 40, y);
+    doc.text('BANG DIEM CHI TIET HOC PHAN (HE 10 & HE 4)', 40, y);
     y += 18;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
@@ -206,7 +302,7 @@ export function AcademicReportsPage({ overview }: { overview: StudentOverviewRes
       }
       doc.text(
         toPdfSafeText(
-          `${e.course_code.padEnd(8)} | ${e.course_name.slice(0, 32).padEnd(33)} | ${e.semester} ${e.academic_year} | ${e.credit_hours} TC | ${e.letter_grade ?? '-'} (${e.grade_point !== null ? e.grade_point.toFixed(2) : '-'}) | ${translateCompletionStatus(e.completion_status)}`
+          `${e.course_code.padEnd(8)} | ${e.course_name.slice(0, 28).padEnd(29)} | ${e.semester} ${e.academic_year} | ${e.credit_hours} TC | ${formatDualGrade(e.numeric_grade, e.letter_grade, e.grade_point)} | ${translateCompletionStatus(e.completion_status)}`
         ),
         40,
         y
@@ -247,6 +343,207 @@ export function AcademicReportsPage({ overview }: { overview: StudentOverviewRes
 
   return (
     <div className="space-y-6">
+      {/* Hộp thư Báo cáo học vụ (Official Academic Reports with Read/Unread Persistence) */}
+      <section className="bg-white border border-[#ECEEF5] rounded-[18px] overflow-hidden no-print">
+        <div className="px-6 py-4 border-b border-[#ECEEF5] flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#F0EDFF] text-[#6558E8] flex items-center justify-center shrink-0">
+              <Inbox className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-bold text-[#20243A]">
+                  Báo cáo học vụ từ Nhà trường
+                </h2>
+                {unreadReportsCount > 0 ? (
+                  <span
+                    data-testid="reports-unread-badge"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F5AE48]/15 text-[#B77416]"
+                  >
+                    <BellDot className="w-3.5 h-3.5" />
+                    <span>{unreadReportsCount} chưa đọc</span>
+                  </span>
+                ) : (
+                  <span
+                    data-testid="reports-unread-badge"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#36B37E]/12 text-[#238A5E]"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Đã đọc tất cả</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#858BA3] mt-0.5">
+                Theo dõi báo cáo tổng kết học kỳ, thông báo học vụ và đánh dấu đã đọc để lưu vĩnh viễn trạng thái trên hồ sơ của bạn
+              </p>
+            </div>
+          </div>
+
+          <div className="inline-flex items-center gap-1 p-1 bg-[#F8F9FD] border border-[#ECEEF5] rounded-xl">
+            {(
+              [
+                { id: 'ALL', label: `Tất cả (${reports.length})` },
+                { id: 'UNREAD', label: `Chưa đọc (${unreadReportsCount})` },
+                { id: 'READ', label: `Đã đọc (${reports.length - unreadReportsCount})` },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setReadFilter(tab.id)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  readFilter === tab.id
+                    ? 'bg-white text-[#6558E8] shadow-xs border border-[#ECEEF5]'
+                    : 'text-[#858BA3] hover:text-[#20243A]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {reportError && (
+          <div
+            role="alert"
+            className="mx-6 mt-4 p-3 rounded-xl bg-[#EF6472]/10 border border-[#EF6472]/30 text-[#C83D4C] text-xs"
+          >
+            {reportError}
+          </div>
+        )}
+
+        {reports.length === 0 ? (
+          <div className="p-10 text-center text-sm text-[#858BA3]">
+            Chưa có báo cáo học vụ nào được ban hành cho tài khoản của bạn.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-[#ECEEF5]">
+            {/* Report List */}
+            <div className="lg:col-span-5 divide-y divide-[#ECEEF5] max-h-[380px] overflow-y-auto">
+              {filteredReports.length === 0 ? (
+                <div className="p-8 text-center text-xs text-[#858BA3]">
+                  Không có báo cáo nào phù hợp với bộ lọc trạng thái.
+                </div>
+              ) : (
+                filteredReports.map((rep) => {
+                  const isSelected = selectedReport?.report_id === rep.report_id;
+                  return (
+                    <button
+                      key={rep.report_id}
+                      type="button"
+                      onClick={() => setSelectedReportId(rep.report_id)}
+                      className={`w-full text-left p-4 transition-colors flex flex-col gap-2 ${
+                        isSelected
+                          ? 'bg-[#F0EDFF]/70'
+                          : !rep.is_read
+                            ? 'bg-[#F5AE48]/[0.04] hover:bg-[#F8F9FD]'
+                            : 'hover:bg-[#F8F9FD]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <SemanticStatusBadge
+                          tone={reportTypeTone(rep.report_type)}
+                          label={translateReportType(rep.report_type)}
+                        />
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                            rep.is_read
+                              ? 'bg-[#36B37E]/12 text-[#238A5E]'
+                              : 'bg-[#F5AE48]/18 text-[#B77416]'
+                          }`}
+                        >
+                          {!rep.is_read && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#F5AE48]" />
+                          )}
+                          <span>{rep.is_read ? 'Đã đọc' : 'Chưa đọc'}</span>
+                        </span>
+                      </div>
+                      <div className="text-sm font-bold text-[#20243A] leading-snug">
+                        {rep.title}
+                      </div>
+                      <p className="text-xs text-[#555C75] line-clamp-2">{rep.summary}</p>
+                      <div className="flex items-center justify-between text-[11px] text-[#858BA3] font-mono">
+                        <span>
+                          {rep.semester} · {rep.academic_year}
+                        </span>
+                        <span>{new Date(rep.created_at).toLocaleDateString('vi-VN')}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Report Detail Reader */}
+            <div className="lg:col-span-7 p-6 flex flex-col justify-between gap-5 bg-[#F8F9FD]/40">
+              {selectedReport ? (
+                <>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SemanticStatusBadge
+                            tone={reportTypeTone(selectedReport.report_type)}
+                            label={translateReportType(selectedReport.report_type)}
+                          />
+                          <SemanticStatusBadge
+                            tone={selectedReport.is_read ? 'success' : 'warning'}
+                            label={selectedReport.is_read ? 'Đã đọc' : 'Chưa đọc'}
+                          />
+                          <span className="text-xs font-mono text-[#858BA3]">
+                            {selectedReport.semester} · {selectedReport.academic_year}
+                          </span>
+                        </div>
+                        <h3 className="text-lg font-bold text-[#20243A]">
+                          {selectedReport.title}
+                        </h3>
+                      </div>
+
+                      {!readOnly && !selectedReport.is_read && onMarkReportRead && (
+                        <button
+                          type="button"
+                          disabled={markingId === selectedReport.report_id}
+                          onClick={() => void handleMarkReportRead(selectedReport.report_id)}
+                          className="px-4 py-2 text-xs font-semibold text-white bg-[#8174F7] hover:bg-[#6558E8] disabled:opacity-60 rounded-xl inline-flex items-center gap-1.5 whitespace-nowrap transition-colors"
+                        >
+                          <MailOpen className="w-3.5 h-3.5" />
+                          <span>
+                            {markingId === selectedReport.report_id
+                              ? 'Đang lưu...'
+                              : 'Đánh dấu đã đọc'}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-white border border-[#ECEEF5] text-xs font-medium text-[#20243A]">
+                      {selectedReport.summary}
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-white border border-[#ECEEF5] text-sm text-[#394058] leading-relaxed whitespace-pre-line">
+                      {selectedReport.content}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-[#ECEEF5] text-xs text-[#858BA3]">
+                    <span className="font-mono">Mã báo cáo: {selectedReport.report_id}</span>
+                    <span>
+                      {selectedReport.is_read && selectedReport.read_at
+                        ? `Đã xác nhận đọc lúc ${new Date(selectedReport.read_at).toLocaleString('vi-VN')}`
+                        : `Phát hành ngày ${new Date(selectedReport.created_at).toLocaleDateString('vi-VN')}`}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="h-full flex items-center justify-center text-sm text-[#858BA3]">
+                  Chọn một báo cáo ở danh sách bên trái để xem chi tiết.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* Filter Toolbar & PDF Export */}
       <div className="bg-white border border-[#ECEEF5] rounded-[16px] p-4 flex flex-wrap items-center justify-between gap-4 no-print">
         <div className="flex flex-wrap items-center gap-3">
@@ -376,7 +673,7 @@ export function AcademicReportsPage({ overview }: { overview: StudentOverviewRes
         </div>
 
         <div className="bg-white border border-[#ECEEF5] rounded-[18px] p-6">
-          <h2 className="text-base font-bold text-[#20243A] mb-1">Phân bố điểm chữ</h2>
+          <h2 className="text-base font-bold text-[#20243A] mb-1">Phân bố điểm chữ (Hệ 4.0)</h2>
           <p className="text-xs text-[#858BA3] mb-4">
             Tần suất các mức điểm chữ đạt được theo bộ lọc hiện tại
           </p>

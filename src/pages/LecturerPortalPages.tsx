@@ -19,6 +19,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  formatDualGrade,
   translateCompletionStatus,
   translateGradeWorkflowStatus,
 } from '../../shared/academicLogic.ts';
@@ -266,10 +267,8 @@ export function LecturerStudentsView({ overview }: { overview: LecturerOverviewR
                       <div className="text-[#858BA3]">{r.student_cohort}</div>
                     </td>
                     <td className="py-3.5 px-5 text-xs text-[#555C75]">{r.attendance_status}</td>
-                    <td className="py-3.5 px-5 text-center font-mono font-bold text-[#20243A]">
-                      {r.numeric_grade !== null
-                        ? `${r.numeric_grade.toFixed(1)} (${r.letter_grade ?? '—'})`
-                        : '—'}
+                    <td className="py-3.5 px-5 text-center font-mono font-bold text-[#20243A] whitespace-nowrap">
+                      {formatDualGrade(r.numeric_grade, r.letter_grade, r.grade_point)}
                     </td>
                     <td className="py-3.5 px-5">
                       <SemanticStatusBadge

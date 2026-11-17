@@ -1,5 +1,6 @@
 import {
   AcademicActivityRecord,
+  AcademicReportRecord,
   AcademicSettingsBundle,
   AcademicWarningRecord,
   AcademicYearRecord,
@@ -13,6 +14,9 @@ import {
   SemesterRecord,
   StudentAcademicSummary,
   StudentProfile,
+  StudentTuitionInvoice,
+  TuitionConfig,
+  TuitionPaymentRecord,
   UserRole,
 } from '../../shared/academicLogic.ts';
 
@@ -37,9 +41,17 @@ export interface StudentOverviewResponse {
   summary: StudentAcademicSummary;
   enrollments: EnrollmentRecord[];
   warnings: AcademicWarningRecord[];
+  reports: AcademicReportRecord[];
+  unreadReportsCount: number;
   activities: AcademicActivityRecord[];
   settings: AcademicSettingsBundle;
   academicTerms: AcademicTermsBundle;
+}
+
+export interface MarkReportReadResponse {
+  ok: boolean;
+  report: AcademicReportRecord;
+  unreadReportsCount: number;
 }
 
 export interface CatalogCourse {
@@ -152,6 +164,43 @@ export interface LecturerScopedStudentRow {
   letter_grade: string | null;
   grade_point: number | null;
   completion_status: CompletionStatus;
+}
+
+export interface StudentTuitionOverviewResponse {
+  config: TuitionConfig;
+  invoices: StudentTuitionInvoice[];
+  payments: TuitionPaymentRecord[];
+  summary: {
+    totalBilled: number;
+    totalPaid: number;
+    totalUnpaid: number;
+    paidCount: number;
+    unpaidCount: number;
+    totalBillableCredits: number;
+  };
+}
+
+export interface TrainingTuitionOverviewResponse {
+  config: TuitionConfig;
+  payments: TuitionPaymentRecord[];
+  studentSummaries: Array<{
+    student_id: string;
+    full_name: string;
+    major: string;
+    totalCredits: number;
+    totalBilled: number;
+    totalPaid: number;
+    totalUnpaid: number;
+    unpaidSemestersCount: number;
+    latestUnpaidLabel: string | null;
+  }>;
+  totals: {
+    totalBilled: number;
+    totalCollected: number;
+    totalOutstanding: number;
+    collectionRate: number;
+    totalTransactions: number;
+  };
 }
 
 const TOKEN_STORAGE_KEY = 'uniportal_auth_token';
@@ -350,8 +399,19 @@ export const api = {
     ),
 
   markWarningRead: (studentId: string, warningId: string) =>
-    requestJson<{ ok: boolean }>(
+    requestJson<{ ok: boolean; warning_id?: string; warning_status?: string; unreadWarningsCount?: number }>(
       `/api/students/${encodeURIComponent(studentId)}/warnings/${encodeURIComponent(warningId)}/read`,
+      { method: 'PATCH' }
+    ),
+
+  getStudentReports: (studentId: string) =>
+    requestJson<{ reports: AcademicReportRecord[]; unreadReportsCount: number }>(
+      `/api/students/${encodeURIComponent(studentId)}/reports`
+    ),
+
+  markReportRead: (studentId: string, reportId: string) =>
+    requestJson<MarkReportReadResponse>(
+      `/api/students/${encodeURIComponent(studentId)}/reports/${encodeURIComponent(reportId)}/read`,
       { method: 'PATCH' }
     ),
 
@@ -639,4 +699,44 @@ export const api = {
         body: JSON.stringify(payload),
       }
     ),
+
+  // Tuition & Real QR Payment
+  getStudentTuition: (studentId: string) =>
+    requestJson<StudentTuitionOverviewResponse>(
+      `/api/students/${encodeURIComponent(studentId)}/tuition`
+    ),
+
+  payStudentTuition: (
+    studentId: string,
+    payload: { semester: string; academic_year: string; transfer_note?: string }
+  ) =>
+    requestJson<{
+      ok: boolean;
+      payment: TuitionPaymentRecord;
+      overview: StudentTuitionOverviewResponse;
+    }>(`/api/students/${encodeURIComponent(studentId)}/tuition/pay`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getTrainingTuition: () =>
+    requestJson<TrainingTuitionOverviewResponse>('/api/training/tuition'),
+
+  updateTuitionConfig: (payload: Partial<TuitionConfig>) =>
+    requestJson<{
+      ok: boolean;
+      config: TuitionConfig;
+      overview: TrainingTuitionOverviewResponse;
+    }>('/api/training/tuition-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteTuitionPayment: (paymentId: string) =>
+    requestJson<{
+      ok: boolean;
+      overview: TrainingTuitionOverviewResponse;
+    }>(`/api/training/tuition/payments/${encodeURIComponent(paymentId)}`, {
+      method: 'DELETE',
+    }),
 };

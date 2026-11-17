@@ -23,7 +23,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { formatGpa, translateStudentAcademicStatus } from '../../shared/academicLogic.ts';
+import {
+  formatGpa,
+  isValidIntegerCredit,
+  translateStudentAcademicStatus,
+  validateCourseCredit,
+} from '../../shared/academicLogic.ts';
 import {
   AdminEnrichedStudent,
   AdminOverviewResponse,
@@ -298,13 +303,23 @@ export function AdminStudentsView({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    const totalReqCredits = Number(form.total_required_credits);
+    const expectedSemCredits = Number(form.expected_credits_per_semester);
+    if (!isValidIntegerCredit(totalReqCredits, 1, 240)) {
+      setError('Tín chỉ tốt nghiệp phải là số nguyên dương (từ 1 đến 240).');
+      return;
+    }
+    if (!isValidIntegerCredit(expectedSemCredits, 1, 40)) {
+      setError('Số tín chỉ kỳ vọng mỗi kỳ phải là số nguyên dương.');
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
         ...form,
         enrollment_year: Number(form.enrollment_year),
-        total_required_credits: Number(form.total_required_credits),
-        expected_credits_per_semester: Number(form.expected_credits_per_semester),
+        total_required_credits: totalReqCredits,
+        expected_credits_per_semester: expectedSemCredits,
       };
       if (editingStudent) {
         await api.updateStudentAdmin(editingStudent.student_id, payload);
@@ -545,7 +560,15 @@ export function AdminStudentsView({
                   </label>
                   <input
                     type="number"
+                    min="1"
+                    max="240"
+                    step="1"
                     value={form.total_required_credits}
+                    onKeyDown={(e) => {
+                      if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
                     onChange={(e) => setForm({ ...form, total_required_credits: e.target.value })}
                     className="w-full px-3 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl"
                   />
@@ -708,10 +731,15 @@ export function AdminCoursesView({
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    const creditCheck = validateCourseCredit(form.credit_hours);
+    if (!creditCheck.valid) {
+      setError(creditCheck.error ?? 'Số tín chỉ phải là số nguyên dương từ 1 đến 12.');
+      return;
+    }
     try {
       const payload = {
         ...form,
-        credit_hours: Number(form.credit_hours),
+        credit_hours: creditCheck.value,
       };
       if (editing) {
         await api.updateCatalogCourse(editing.course_id, payload);
@@ -849,12 +877,19 @@ export function AdminCoursesView({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#20243A] mb-1">Số tín chỉ</label>
+                  <label className="block text-xs font-medium text-[#20243A] mb-1">
+                    Số tín chỉ (số nguyên)
+                  </label>
                   <input
                     type="number"
-                    step="0.5"
-                    min="0.5"
+                    step="1"
+                    min="1"
                     value={form.credit_hours}
+                    onKeyDown={(e) => {
+                      if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
                     onChange={(e) => setForm({ ...form, credit_hours: e.target.value })}
                     className="w-full px-3 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl"
                   />

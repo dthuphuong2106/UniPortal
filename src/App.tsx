@@ -7,6 +7,7 @@ import {
   ApiError,
   CatalogCourse,
   LecturerOverviewResponse,
+  MarkReportReadResponse,
   StudentOverviewResponse,
 } from './services/api.ts';
 import { ActiveRouteKey, ShellLayout } from './components/ShellLayout.tsx';
@@ -44,6 +45,8 @@ import {
   TrainingResultsExplorerView,
   TrainingSectionsAndAssignmentsView,
 } from './pages/TrainingManagementPages.tsx';
+import { TuitionPaymentPage } from './pages/TuitionPaymentPage.tsx';
+import { TrainingTuitionPage } from './pages/TrainingTuitionPage.tsx';
 
 function AdminSystemSettingsView({
   data,
@@ -60,12 +63,17 @@ function AdminSystemSettingsView({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsedCredits = Number(defaultCredits);
+    if (!Number.isInteger(parsedCredits) || parsedCredits < 30 || parsedCredits > 240) {
+      setSavedMsg(null);
+      return;
+    }
     setSaving(true);
     setSavedMsg(null);
     try {
       await api.updateSetting('gpa_policy', {
         ...data.settings.gpaPolicy,
-        defaultRequiredCredits: Math.max(1, Number(defaultCredits) || 130),
+        defaultRequiredCredits: parsedCredits,
       });
       await onReload();
       setSavedMsg('Đã cập nhật số tín chỉ chuẩn tốt nghiệp mặc định.');
@@ -98,6 +106,7 @@ function AdminSystemSettingsView({
             type="number"
             min="30"
             max="240"
+            step="1"
             value={defaultCredits}
             onChange={(e) => setDefaultCredits(e.target.value)}
             className="w-full px-3.5 py-2.5 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
@@ -163,6 +172,10 @@ const ROUTE_META: Record<ActiveRouteKey, { title: string; breadcrumbs: string[] 
   student_planner: {
     title: 'Kế hoạch GPA mục tiêu',
     breadcrumbs: ['UniPortal', 'Cổng sinh viên', 'Kế hoạch GPA mục tiêu'],
+  },
+  student_tuition: {
+    title: 'Học phí & Thanh toán QR',
+    breadcrumbs: ['UniPortal', 'Cổng sinh viên', 'Học phí & Thanh toán QR'],
   },
   student_warnings: {
     title: 'Cảnh báo học vụ',
@@ -251,6 +264,10 @@ const ROUTE_META: Record<ActiveRouteKey, { title: string; breadcrumbs: string[] 
   td_grade_rules: {
     title: 'Quy chế & thang điểm',
     breadcrumbs: ['UniPortal', 'Phòng Đào tạo', 'Quy chế điểm'],
+  },
+  td_tuition: {
+    title: 'Quản lý học phí & QR',
+    breadcrumbs: ['UniPortal', 'Phòng Đào tạo', 'Quản lý học phí & QR'],
   },
   td_settings: {
     title: 'Cấu hình học vụ',
@@ -414,7 +431,31 @@ function PortalWorkspace() {
   const handleMarkWarningRead = async (warningId: string) => {
     if (!user.student_id) return;
     await api.markWarningRead(user.student_id, warningId);
-    await loadWorkspaceData();
+    setStudentOverview((prev) =>
+      prev
+        ? {
+            ...prev,
+            warnings: prev.warnings.map((w) =>
+              w.warning_id === warningId && w.warning_status === 'Active'
+                ? { ...w, warning_status: 'Read' }
+                : w
+            ),
+          }
+        : prev
+    );
+  };
+
+  const handleReportMarkedRead = (reportId: string, response: MarkReportReadResponse) => {
+    setStudentOverview((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        unreadReportsCount: response.unreadReportsCount,
+        reports: (prev.reports ?? []).map((r) =>
+          r.report_id === reportId ? response.report : r
+        ),
+      };
+    });
   };
 
   const handleOpenLecturerSection = (sectionId: string) => {
@@ -444,6 +485,7 @@ function PortalWorkspace() {
         activeWarnings={activeWarningsList}
         lecturerNotifications={lecturerOverview?.notifications ?? []}
         pendingApprovalCount={adminOverview?.metrics.pendingApprovals ?? 0}
+        unreadReportsCount={user.role === 'STUDENT' ? studentOverview?.unreadReportsCount ?? 0 : 0}
         onMarkWarningRead={user.role === 'STUDENT' ? handleMarkWarningRead : undefined}
         headerActions={
           <button
@@ -504,6 +546,13 @@ function PortalWorkspace() {
               {effectiveRoute === 'student_planner' && (
                 <TargetGpaPlannerPage overview={studentOverview} />
               )}
+              {effectiveRoute === 'student_tuition' && (
+                <TuitionPaymentPage
+                  overview={studentOverview}
+                  onToast={showToast}
+                  onReloadWorkspace={loadWorkspaceData}
+                />
+              )}
               {effectiveRoute === 'student_warnings' && (
                 <AcademicWarningsPage
                   overview={studentOverview}
@@ -512,7 +561,10 @@ function PortalWorkspace() {
                 />
               )}
               {effectiveRoute === 'student_reports' && (
-                <AcademicReportsPage overview={studentOverview} />
+                <AcademicReportsPage
+                  overview={studentOverview}
+                  onMarkReportRead={handleReportMarkedRead}
+                />
               )}
               {effectiveRoute === 'student_profile' && (
                 <StudentProfilePage
@@ -643,6 +695,9 @@ function PortalWorkspace() {
             )}
             {effectiveRoute === 'td_grade_rules' && (
               <AdminGradeConfigView data={adminOverview} onReload={loadWorkspaceData} />
+            )}
+            {effectiveRoute === 'td_tuition' && (
+              <TrainingTuitionPage onToast={showToast} />
             )}
             {effectiveRoute === 'td_settings' && (
               <AdminSystemSettingsView data={adminOverview} onReload={loadWorkspaceData} />

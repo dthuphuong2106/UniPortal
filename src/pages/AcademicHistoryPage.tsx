@@ -14,10 +14,13 @@ import {
 import {
   CompletionStatus,
   formatGpa,
+  formatTenScale,
   resolveGradeFromScale,
   resolveLetterFromNumeric,
   SemesterGpaSummary,
   translateCompletionStatus,
+  validateCourseCredit,
+  validateScoreOnTenScale,
 } from '../../shared/academicLogic.ts';
 import { api, CatalogCourse, StudentOverviewResponse } from '../services/api.ts';
 import { SemanticStatusBadge, SemanticTone } from '../components/PortalUI.tsx';
@@ -170,22 +173,28 @@ export function AcademicHistoryPage({
     e.preventDefault();
     if (!addModalTerm) return;
     setFormError(null);
+    const creditCheck = validateCourseCredit(creditHours);
+    if (!creditCheck.valid) {
+      setFormError(creditCheck.error ?? 'Số tín chỉ phải là số nguyên dương từ 1 đến 12.');
+      return;
+    }
+    const isFinalized = completionStatus === 'Completed' || completionStatus === 'Failed';
+    const scoreCheck = validateScoreOnTenScale(numericGrade);
+    if (isFinalized && !scoreCheck.valid) {
+      setFormError(scoreCheck.error ?? 'Điểm hệ 10 phải nằm trong khoảng 0.00 đến 10.00.');
+      return;
+    }
     setSaving(true);
     try {
       await api.addEnrollment(student.student_id, {
         course_code: courseCode.trim().toUpperCase(),
         course_name: courseName.trim(),
-        credit_hours: Number(creditHours),
+        credit_hours: creditCheck.value,
         semester: addModalTerm.semester,
         academic_year: addModalTerm.academicYear,
         completion_status: completionStatus,
-        letter_grade:
-          completionStatus === 'Completed' || completionStatus === 'Failed' ? letterGrade : null,
-        numeric_grade:
-          (completionStatus === 'Completed' || completionStatus === 'Failed') &&
-          numericGrade.trim() !== ''
-            ? Number(numericGrade)
-            : null,
+        letter_grade: isFinalized ? letterGrade : null,
+        numeric_grade: isFinalized ? scoreCheck.value : null,
       });
       setExpandedKeys((prev) => ({
         ...prev,
@@ -435,6 +444,7 @@ export function AcademicHistoryPage({
                                   <th className="py-2.5 px-4">Mã HP</th>
                                   <th className="py-2.5 px-4">Tên học phần</th>
                                   <th className="py-2.5 px-4 text-center">Tín chỉ</th>
+                                  <th className="py-2.5 px-4 text-center">Hệ 10</th>
                                   <th className="py-2.5 px-4 text-center">Điểm chữ</th>
                                   <th className="py-2.5 px-4 text-center">Hệ 4</th>
                                   <th className="py-2.5 px-4">Trạng thái</th>
@@ -466,11 +476,14 @@ export function AcademicHistoryPage({
                                       <td className="py-3 px-4 text-center font-mono tabular-nums">
                                         {c.credit_hours}
                                       </td>
+                                      <td className="py-3 px-4 text-center font-mono text-[#555C75] tabular-nums">
+                                        {formatTenScale(c.numeric_grade)}
+                                      </td>
                                       <td className="py-3 px-4 text-center font-mono font-bold text-[#20243A]">
                                         {c.letter_grade ?? '—'}
                                       </td>
                                       <td className="py-3 px-4 text-center font-mono text-[#6558E8] tabular-nums">
-                                        {c.grade_point !== null ? c.grade_point.toFixed(2) : '—'}
+                                        {c.grade_point !== null ? c.grade_point.toFixed(1) : '—'}
                                       </td>
                                       <td className="py-3 px-4">
                                         <SemanticStatusBadge
@@ -482,7 +495,7 @@ export function AcademicHistoryPage({
                                         {c.included_in_gpa ? (
                                           <span className="inline-flex items-center gap-1 text-[#238A5E] font-medium">
                                             <CheckCircle2 className="w-3.5 h-3.5" />
-                                            <span>Tính vào CGPA ({c.weighted_points.toFixed(2)} đ)</span>
+                                            <span>Tính vào CGPA</span>
                                           </span>
                                         ) : rawEnrollment?.is_official === 0 ? (
                                           <span>Chờ Phòng Đào tạo duyệt bảng điểm</span>
@@ -573,15 +586,19 @@ export function AcademicHistoryPage({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-[#20243A] mb-1">
-                    Số tín chỉ *
+                    Số tín chỉ (số nguyên) *
                   </label>
                   <input
                     type="number"
-                    step="0.5"
-                    min="0.5"
-                    max="12"
+                    step="1"
+                    min="1"
                     required
                     value={creditHours}
+                    onKeyDown={(e) => {
+                      if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
                     onChange={(e) => setCreditHours(e.target.value)}
                     className="w-full px-3 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl"
                   />
@@ -645,20 +662,20 @@ export function AcademicHistoryPage({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-[#20243A] mb-1">
-                    Điểm (0–100)
+                    Điểm hệ 10 (0–10)
                   </label>
                   <input
                     type="number"
                     min="0"
-                    max="100"
-                    step="0.5"
+                    max="10"
+                    step="0.1"
                     disabled={completionStatus === 'In Progress' || completionStatus === 'Withdrawn'}
                     value={numericGrade}
                     onChange={(e) => {
                       const val = e.target.value;
                       setNumericGrade(val);
                       const num = Number(val);
-                      if (val !== '' && Number.isFinite(num) && num >= 0 && num <= 100) {
+                      if (val !== '' && Number.isFinite(num) && num >= 0 && num <= 10) {
                         const resolved = resolveLetterFromNumeric(num, settings.gradingScale);
                         if (resolved) {
                           setLetterGrade(resolved.letter);
@@ -666,7 +683,7 @@ export function AcademicHistoryPage({
                         }
                       }
                     }}
-                    placeholder="Tùy chọn"
+                    placeholder="VD: 8.5"
                     className="w-full px-3 py-2 text-sm font-mono border border-[#ECEEF5] rounded-xl disabled:bg-[#F8F9FD]"
                   />
                 </div>

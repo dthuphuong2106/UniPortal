@@ -128,7 +128,7 @@ export function LecturerClassWorkspacePage({
       const fin = row.final_score.trim() === '' ? null : Number(row.final_score);
 
       const invalid = [att, asg, mid, fin].some(
-        (v) => v !== null && (!Number.isFinite(v) || v < 0 || v > 100)
+        (v) => v !== null && (!Number.isFinite(v) || v < 0 || v > 10)
       );
 
       const numeric = invalid
@@ -201,7 +201,7 @@ export function LecturerClassWorkspacePage({
   const handleSaveDraft = async () => {
     if (!detail) return;
     if (computedRows.some((c) => c.invalid)) {
-      setError('Điểm thành phần phải nằm trong khoảng từ 0 đến 100.');
+      setError('Điểm thành phần (thang 10) phải nằm trong khoảng từ 0 đến 10.');
       return;
     }
     setError(null);
@@ -221,7 +221,7 @@ export function LecturerClassWorkspacePage({
   const handleConfirmSubmit = async () => {
     if (!detail) return;
     if (computedRows.some((c) => c.invalid)) {
-      setError('Vui lòng sửa các điểm vượt ngoài phạm vi 0–100 trước khi gửi duyệt.');
+      setError('Vui lòng sửa các điểm vượt ngoài phạm vi 0–10 trước khi gửi duyệt.');
       setSubmitModalOpen(false);
       return;
     }
@@ -254,7 +254,7 @@ export function LecturerClassWorkspacePage({
       'Bài tập',
       'Giữa kỳ',
       'Cuối kỳ',
-      'Tổng kết (100)',
+      'Tổng kết (Hệ 10)',
       'Điểm chữ',
       'Hệ 4',
       'Kết quả',
@@ -461,12 +461,12 @@ export function LecturerClassWorkspacePage({
                     <th className="py-3 px-4">MSSV</th>
                     <th className="py-3 px-4">Họ và tên</th>
                     <th className="py-3 px-4">Chuyên cần (TT)</th>
-                    <th className="py-3 px-4 text-center">Chuyên cần</th>
-                    <th className="py-3 px-4 text-center">Bài tập</th>
-                    <th className="py-3 px-4 text-center">Giữa kỳ</th>
-                    <th className="py-3 px-4 text-center">Cuối kỳ</th>
-                    <th className="py-3 px-4 text-right">Tổng kết</th>
-                    <th className="py-3 px-4 text-center">Hệ 4</th>
+                    <th className="py-3 px-4 text-center">Chuyên cần (0–10)</th>
+                    <th className="py-3 px-4 text-center">Bài tập (0–10)</th>
+                    <th className="py-3 px-4 text-center">Giữa kỳ (0–10)</th>
+                    <th className="py-3 px-4 text-center">Cuối kỳ (0–10)</th>
+                    <th className="py-3 px-4 text-right">Tổng kết (Hệ 10)</th>
+                    <th className="py-3 px-4 text-center">Điểm chữ · Hệ 4</th>
                     <th className="py-3 px-4">Kết quả</th>
                   </tr>
                 </thead>
@@ -505,8 +505,8 @@ export function LecturerClassWorkspacePage({
                           <input
                             type="number"
                             min="0"
-                            max="100"
-                            step="0.5"
+                            max="10"
+                            step="0.1"
                             disabled={isLocked}
                             value={row.attendance_score}
                             onChange={(e) =>
@@ -520,8 +520,8 @@ export function LecturerClassWorkspacePage({
                           <input
                             type="number"
                             min="0"
-                            max="100"
-                            step="0.5"
+                            max="10"
+                            step="0.1"
                             disabled={isLocked}
                             value={row.assignment_score}
                             onChange={(e) =>
@@ -535,8 +535,8 @@ export function LecturerClassWorkspacePage({
                           <input
                             type="number"
                             min="0"
-                            max="100"
-                            step="0.5"
+                            max="10"
+                            step="0.1"
                             disabled={isLocked}
                             value={row.midterm_score}
                             onChange={(e) =>
@@ -550,8 +550,8 @@ export function LecturerClassWorkspacePage({
                           <input
                             type="number"
                             min="0"
-                            max="100"
-                            step="0.5"
+                            max="10"
+                            step="0.1"
                             disabled={isLocked}
                             value={row.final_score}
                             onChange={(e) =>
@@ -563,18 +563,25 @@ export function LecturerClassWorkspacePage({
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-bold tabular-nums">
                           {invalid ? (
-                            <span className="text-xs text-[#C83D4C]">Lỗi</span>
+                            <span className="text-xs text-[#C83D4C]">Lỗi (0–10)</span>
                           ) : numeric !== null ? (
                             <span>
-                              {numeric.toFixed(1)}{' '}
-                              <span className="text-[#6558E8]">({letter})</span>
+                              {Number(numeric.toFixed(2)).toString()}{' '}
+                              <span className="text-xs font-normal text-[#858BA3]">/ 10</span>
                             </span>
                           ) : (
                             '—'
                           )}
                         </td>
-                        <td className="py-3 px-4 text-center font-mono tabular-nums text-[#20243A]">
-                          {point !== null ? point.toFixed(2) : '—'}
+                        <td className="py-3 px-4 text-center font-mono tabular-nums text-[#20243A] whitespace-nowrap">
+                          {letter && point !== null ? (
+                            <span>
+                              <span className="font-bold text-[#6558E8]">{letter}</span>{' '}
+                              <span className="text-[#858BA3]">/ {point.toFixed(1)}</span>
+                            </span>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           <SemanticStatusBadge

@@ -46,7 +46,7 @@ export function StudentSettingsPage({ settings }: { settings: AcademicSettingsBu
                 <tr className="bg-[#F8F9FD] border-b border-[#ECEEF5] text-xs font-semibold text-[#858BA3]">
                   <th className="py-2.5 px-3">Điểm chữ</th>
                   <th className="py-2.5 px-3 text-right">Điểm hệ 4</th>
-                  <th className="py-2.5 px-3 text-right">Thang 100</th>
+                  <th className="py-2.5 px-3 text-right">Thang 10</th>
                   <th className="py-2.5 px-3 text-right">Trạng thái</th>
                 </tr>
               </thead>
@@ -57,10 +57,10 @@ export function StudentSettingsPage({ settings }: { settings: AcademicSettingsBu
                       {g.letter}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono tabular-nums text-[#20243A]">
-                      {g.point.toFixed(2)}
+                      {g.point.toFixed(1)}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-xs text-[#858BA3] tabular-nums">
-                      {g.minNumeric}–{g.maxNumeric}
+                      {g.minNumeric.toFixed(1)}–{g.maxNumeric.toFixed(2)}
                     </td>
                     <td className="py-2.5 px-3 text-right text-xs font-medium">
                       <span className={g.passing ? 'text-[#238A5E]' : 'text-[#C83D4C]'}>
