@@ -30,9 +30,12 @@ import {
   StudentProfile,
   StudentTuitionInvoice,
   TuitionConfig,
+  TuitionDueSummary,
   TuitionPaymentRecord,
   WarningThresholds,
   buildStudentTuitionInvoices,
+  computeTuitionDueSummary,
+  isValidIsoDateYmd,
 } from '../shared/academicLogic.ts';
 
 export function getAcademicTerms(): {
@@ -566,15 +569,26 @@ export function getTuitionConfig(): TuitionConfig {
         Number.isInteger(parsed.debtAlertThreshold) && (parsed.debtAlertThreshold ?? -1) >= 0
           ? Number(parsed.debtAlertThreshold)
           : DEFAULT_TUITION_CONFIG.debtAlertThreshold,
+      paymentDueDate: isValidIsoDateYmd(parsed.paymentDueDate)
+        ? parsed.paymentDueDate
+        : DEFAULT_TUITION_CONFIG.paymentDueDate,
+      dueReminderDays:
+        Number.isInteger(parsed.dueReminderDays) &&
+        (parsed.dueReminderDays ?? 0) >= 1 &&
+        (parsed.dueReminderDays ?? 0) <= 180
+          ? Number(parsed.dueReminderDays)
+          : DEFAULT_TUITION_CONFIG.dueReminderDays,
       bankName: parsed.bankName?.trim() || DEFAULT_TUITION_CONFIG.bankName,
       accountNumber: parsed.accountNumber?.trim() || DEFAULT_TUITION_CONFIG.accountNumber,
       accountHolder: parsed.accountHolder?.trim() || DEFAULT_TUITION_CONFIG.accountHolder,
       transferNotePrefix:
         parsed.transferNotePrefix?.trim() || DEFAULT_TUITION_CONFIG.transferNotePrefix,
       qrImageDataUrl:
-        typeof parsed.qrImageDataUrl === 'string' && parsed.qrImageDataUrl.startsWith('data:image/')
+        typeof parsed.qrImageDataUrl === 'string' &&
+        (parsed.qrImageDataUrl.startsWith('data:image/') ||
+          parsed.qrImageDataUrl.startsWith('/assets/'))
           ? parsed.qrImageDataUrl
-          : null,
+          : DEFAULT_TUITION_CONFIG.qrImageDataUrl,
       updatedAt: parsed.updatedAt || row.updated_at,
     };
   } catch {
@@ -595,6 +609,9 @@ export function getStudentTuitionOverview(studentId: string): {
     totalBillableCredits: number;
     debtAlertThreshold: number;
     isDebtOverThreshold: boolean;
+    paymentDueDate: string;
+    dueReminderDays: number;
+    nextUnpaidDue: TuitionDueSummary | null;
   };
 } {
   const config = getTuitionConfig();
@@ -620,6 +637,7 @@ export function getStudentTuitionOverview(studentId: string): {
   const totalBillableCredits = invoices.reduce((sum, inv) => sum + inv.totalCredits, 0);
   const debtAlertThreshold = config.debtAlertThreshold;
   const isDebtOverThreshold = totalUnpaid > debtAlertThreshold;
+  const nextUnpaidDue = computeTuitionDueSummary(invoices, config);
 
   return {
     config,
@@ -634,6 +652,9 @@ export function getStudentTuitionOverview(studentId: string): {
       totalBillableCredits,
       debtAlertThreshold,
       isDebtOverThreshold,
+      paymentDueDate: config.paymentDueDate,
+      dueReminderDays: config.dueReminderDays,
+      nextUnpaidDue,
     },
   };
 }

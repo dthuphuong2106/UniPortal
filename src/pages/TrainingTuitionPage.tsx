@@ -1,16 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
-  ImagePlus,
   QrCode,
   RotateCcw,
   Save,
   Search,
-  Trash2,
   Upload,
 } from 'lucide-react';
 import {
   buildTuitionTransferNote,
+  DEFAULT_TUITION_CONFIG,
   formatVnd,
   TuitionPaymentRecord,
 } from '../../shared/academicLogic.ts';
@@ -32,6 +31,8 @@ export function TrainingTuitionPage({
   // Config form state
   const [pricePerCredit, setPricePerCredit] = useState('850000');
   const [debtAlertThreshold, setDebtAlertThreshold] = useState('5000000');
+  const [paymentDueDate, setPaymentDueDate] = useState('2026-11-25');
+  const [dueReminderDays, setDueReminderDays] = useState('14');
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountHolder, setAccountHolder] = useState('');
@@ -48,6 +49,8 @@ export function TrainingTuitionPage({
   const syncFormFromConfig = (overview: TrainingTuitionOverviewResponse) => {
     setPricePerCredit(String(overview.config.pricePerCredit));
     setDebtAlertThreshold(String(overview.config.debtAlertThreshold ?? 5000000));
+    setPaymentDueDate(overview.config.paymentDueDate || '2026-11-25');
+    setDueReminderDays(String(overview.config.dueReminderDays ?? 14));
     setBankName(overview.config.bankName);
     setAccountNumber(overview.config.accountNumber);
     setAccountHolder(overview.config.accountHolder);
@@ -113,6 +116,15 @@ export function TrainingTuitionPage({
       setConfigError('Ngưỡng cảnh báo công nợ phải là số nguyên không âm (tối đa 500.000.000 đ).');
       return;
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDueDate)) {
+      setConfigError('Vui lòng chọn ngày đến hạn thanh toán học phí hợp lệ.');
+      return;
+    }
+    const parsedReminderDays = Number(dueReminderDays);
+    if (!Number.isInteger(parsedReminderDays) || parsedReminderDays < 1 || parsedReminderDays > 180) {
+      setConfigError('Số ngày nhắc trước hạn phải là số nguyên từ 1 đến 180 ngày.');
+      return;
+    }
     if (!bankName.trim() || !accountNumber.trim() || !accountHolder.trim() || !transferNotePrefix.trim()) {
       setConfigError('Vui lòng nhập đầy đủ thông tin tài khoản ngân hàng và tiền tố nội dung.');
       return;
@@ -123,6 +135,8 @@ export function TrainingTuitionPage({
       const res = await api.updateTuitionConfig({
         pricePerCredit: parsedPrice,
         debtAlertThreshold: parsedThreshold,
+        paymentDueDate,
+        dueReminderDays: parsedReminderDays,
         bankName: bankName.trim(),
         accountNumber: accountNumber.trim(),
         accountHolder: accountHolder.trim(),
@@ -319,6 +333,35 @@ export function TrainingTuitionPage({
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[#20243A] mb-1.5">
+                Hạn thanh toán học phí kỳ hiện tại
+              </label>
+              <input
+                type="date"
+                value={paymentDueDate}
+                onChange={(e) => setPaymentDueDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#20243A] mb-1.5">
+                Nhắc trước ngày đến hạn (số ngày)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="180"
+                step="1"
+                value={dueReminderDays}
+                onChange={(e) => setDueReminderDays(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-sm font-mono border border-[#ECEEF5] rounded-xl focus:outline-none focus:border-[#8174F7]"
+              />
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-[#20243A] mb-1.5">
               Tên ngân hàng thụ hưởng
@@ -384,25 +427,18 @@ export function TrainingTuitionPage({
             Tải ảnh mã QR thật (PNG/JPG/WEBP ≤ 2.5MB). Tất cả sinh viên sẽ nhìn thấy mã này khi thanh toán học phí.
           </p>
 
-          {qrImageDataUrl ? (
-            <div className="bg-white p-3 rounded-2xl border border-[#ECEEF5] shadow-xs">
-              <img
-                src={qrImageDataUrl}
-                alt="Mã QR thu học phí chính thức"
-                className="w-48 h-48 object-contain rounded-xl"
-              />
-            </div>
-          ) : (
-            <div className="w-48 h-48 rounded-2xl border-2 border-dashed border-[#D5D9EC] bg-white flex flex-col items-center justify-center px-4">
-              <ImagePlus className="w-8 h-8 text-[#8174F7] mb-2" />
-              <span className="text-xs font-medium text-[#858BA3]">Chưa tải ảnh QR lên</span>
-            </div>
-          )}
+          <div className="bg-white p-3 rounded-2xl border border-[#ECEEF5] shadow-xs">
+            <img
+              src={qrImageDataUrl || DEFAULT_TUITION_CONFIG.qrImageDataUrl || ''}
+              alt="Mã QR thu học phí chính thức"
+              className="w-48 h-48 object-contain rounded-xl"
+            />
+          </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
             <label className="cursor-pointer px-3.5 py-2 text-xs font-semibold text-[#6558E8] bg-white hover:bg-[#F0EDFF] border border-[#8174F7]/35 rounded-xl inline-flex items-center gap-1.5 transition-colors">
               <Upload className="w-3.5 h-3.5" />
-              <span>{qrImageDataUrl ? 'Thay ảnh QR' : 'Tải ảnh QR thật'}</span>
+              <span>Thay ảnh QR khác</span>
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp,image/gif"
@@ -411,14 +447,14 @@ export function TrainingTuitionPage({
               />
             </label>
 
-            {qrImageDataUrl && (
+            {qrImageDataUrl && qrImageDataUrl !== DEFAULT_TUITION_CONFIG.qrImageDataUrl && (
               <button
                 type="button"
-                onClick={() => setQrImageDataUrl(null)}
-                className="px-3 py-2 text-xs font-medium text-[#C83D4C] bg-white border border-[#EF6472]/30 hover:bg-[#EF6472]/10 rounded-xl inline-flex items-center gap-1"
+                onClick={() => setQrImageDataUrl(DEFAULT_TUITION_CONFIG.qrImageDataUrl)}
+                className="px-3 py-2 text-xs font-medium text-[#555C75] bg-white border border-[#ECEEF5] hover:bg-[#F8F9FD] rounded-xl inline-flex items-center gap-1"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Gỡ ảnh</span>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>QR mặc định</span>
               </button>
             )}
           </div>

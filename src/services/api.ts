@@ -16,6 +16,7 @@ import {
   StudentProfile,
   StudentTuitionInvoice,
   TuitionConfig,
+  TuitionDueSummary,
   TuitionPaymentRecord,
   UserRole,
 } from '../../shared/academicLogic.ts';
@@ -180,6 +181,9 @@ export interface StudentTuitionOverviewResponse {
     totalBillableCredits: number;
     debtAlertThreshold: number;
     isDebtOverThreshold: boolean;
+    paymentDueDate: string;
+    dueReminderDays: number;
+    nextUnpaidDue: TuitionDueSummary | null;
   };
 }
 

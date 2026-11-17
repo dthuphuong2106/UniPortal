@@ -10,12 +10,9 @@ import {
   Copy,
   CreditCard,
   Download,
-  ImagePlus,
   QrCode,
   Receipt,
-  Trash2,
   TrendingUp,
-  Upload,
 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -28,6 +25,8 @@ import {
   YAxis,
 } from 'recharts';
 import {
+  DEFAULT_TUITION_CONFIG,
+  formatDisplayDate,
   formatVnd,
   StudentTuitionInvoice,
   TuitionPaymentRecord,
@@ -42,9 +41,6 @@ function toPdfSafeText(input: string): string {
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D');
 }
-
-const MAX_QR_FILE_BYTES = 2.5 * 1024 * 1024;
-const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
 
 function exportReceiptPdf(
   studentName: string,
@@ -146,21 +142,12 @@ export function TuitionPaymentPage({
   onReloadWorkspace?: () => Promise<void>;
 }) {
   const { student } = overview;
-  const localQrStorageKey = `uniportal_test_qr_${student.student_id}`;
 
   const [tuitionData, setTuitionData] = useState<StudentTuitionOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedInvoiceKey, setSelectedInvoiceKey] = useState<string>('');
   const [expandedInvoiceKeys, setExpandedInvoiceKeys] = useState<Record<string, boolean>>({});
-  const [customTestQr, setCustomTestQr] = useState<string | null>(() => {
-    try {
-      return window.localStorage.getItem(localQrStorageKey);
-    } catch {
-      return null;
-    }
-  });
-  const [qrUploadError, setQrUploadError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -230,12 +217,10 @@ export function TuitionPaymentPage({
     });
   }, [tuitionData]);
 
-  const activeQrImage = customTestQr || tuitionData?.config.qrImageDataUrl || null;
-  const qrSourceLabel = customTestQr
-    ? 'Ảnh QR quét thử bạn vừa tải lên'
-    : tuitionData?.config.qrImageDataUrl
-      ? 'Mã QR chính thức của Nhà trường'
-      : null;
+  const activeQrImage =
+    tuitionData?.config.qrImageDataUrl ||
+    DEFAULT_TUITION_CONFIG.qrImageDataUrl ||
+    '/assets/aistudio/image_901c93aa.png';
 
   const handleCopy = (fieldKey: string, value: string) => {
     if (!navigator.clipboard) return;
@@ -245,52 +230,6 @@ export function TuitionPaymentPage({
         setCopiedField((prev) => (prev === fieldKey ? null : prev));
       }, 1800);
     });
-  };
-
-  const handleUploadTestQr = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQrUploadError(null);
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      setQrUploadError('Vui lòng chọn tệp ảnh hợp lệ (PNG, JPG, WEBP hoặc GIF).');
-      return;
-    }
-    if (file.size > MAX_QR_FILE_BYTES) {
-      setQrUploadError('Dung lượng ảnh QR tối đa là 2.5MB.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : null;
-      if (!result) {
-        setQrUploadError('Không thể đọc dữ liệu ảnh QR.');
-        return;
-      }
-      setCustomTestQr(result);
-      try {
-        window.localStorage.setItem(localQrStorageKey, result);
-      } catch {
-        // Ignore storage quota warning; keep in state for current session
-      }
-      onToast?.('Đã tải ảnh QR lên cổng thanh toán để sẵn sàng quét thử.', 'info');
-    };
-    reader.onerror = () => {
-      setQrUploadError('Đã xảy ra lỗi khi đọc tệp ảnh QR.');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleClearCustomQr = () => {
-    setCustomTestQr(null);
-    setQrUploadError(null);
-    try {
-      window.localStorage.removeItem(localQrStorageKey);
-    } catch {
-      // Ignore
-    }
   };
 
   const handleConfirmPayment = async () => {
@@ -599,6 +538,11 @@ export function TuitionPaymentPage({
                           <div className="text-xs text-[#858BA3] mt-1 font-mono tabular-nums">
                             {inv.courses.length} học phần · {inv.totalCredits} tín chỉ ·{' '}
                             {formatVnd(inv.unitPrice)}/TC
+                            {inv.status === 'UNPAID' && config.paymentDueDate && (
+                              <span className="ml-2 text-[#6558E8]">
+                                · Hạn nộp: {formatDisplayDate(config.paymentDueDate)}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <span className="text-[#858BA3] ml-1 shrink-0">
@@ -709,13 +653,13 @@ export function TuitionPaymentPage({
           )}
         </div>
 
-        {/* Right Panel: Real QR Upload & Scan Portal */}
+        {/* Right Panel: Direct QR Payment Portal */}
         <div className="lg:col-span-5 bg-white border border-[#ECEEF5] rounded-[18px] p-6 space-y-5 lg:sticky lg:top-20">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-[#20243A]">Cổng thanh toán QR</h2>
               <p className="text-xs text-[#858BA3] mt-0.5">
-                Tải ảnh mã QR thật để quét thử bằng ứng dụng ngân hàng trên điện thoại.
+                Quét mã VietQR bằng ứng dụng ngân hàng trên điện thoại để thanh toán học phí.
               </p>
             </div>
             <div className="w-9 h-9 rounded-xl bg-[#F0EDFF] text-[#6558E8] flex items-center justify-center shrink-0">
@@ -744,60 +688,17 @@ export function TuitionPaymentPage({
                 </div>
               </div>
 
-              {/* QR Display & Direct Upload Area */}
-              <div className="rounded-2xl border border-[#ECEEF5] bg-[#F8F9FD]/60 p-4 flex flex-col items-center text-center space-y-3">
-                {activeQrImage ? (
-                  <div className="bg-white p-3 rounded-2xl border border-[#ECEEF5] shadow-xs">
-                    <img
-                      src={activeQrImage}
-                      alt="Mã QR thanh toán học phí"
-                      className="w-52 h-52 object-contain rounded-xl"
-                    />
-                  </div>
-                ) : (
-                  <div className="w-52 h-52 rounded-2xl border-2 border-dashed border-[#D5D9EC] bg-white flex flex-col items-center justify-center px-4 text-center">
-                    <ImagePlus className="w-8 h-8 text-[#8174F7] mb-2" />
-                    <div className="text-xs font-semibold text-[#20243A]">
-                      Chưa có ảnh mã QR
-                    </div>
-                    <p className="text-[11px] text-[#858BA3] mt-1 leading-relaxed">
-                      Tải ảnh QR ngân hàng/ví của bạn lên đây để dùng điện thoại quét thử giao dịch.
-                    </p>
-                  </div>
-                )}
-
-                {qrSourceLabel && (
-                  <div className="text-[11px] font-medium text-[#555C75]">{qrSourceLabel}</div>
-                )}
-
-                {qrUploadError && (
-                  <div className="w-full p-2.5 rounded-xl bg-[#EF6472]/10 border border-[#EF6472]/30 text-[#C83D4C] text-xs">
-                    {qrUploadError}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <label className="cursor-pointer px-3.5 py-2 text-xs font-semibold text-[#6558E8] bg-white hover:bg-[#F0EDFF] border border-[#8174F7]/35 rounded-xl inline-flex items-center gap-1.5 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>{activeQrImage ? 'Đổi ảnh QR quét thử' : 'Tải ảnh QR để quét thử'}</span>
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      onChange={handleUploadTestQr}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {customTestQr && (
-                    <button
-                      type="button"
-                      onClick={handleClearCustomQr}
-                      className="px-3 py-2 text-xs font-medium text-[#858BA3] hover:text-[#C83D4C] bg-white border border-[#ECEEF5] rounded-xl inline-flex items-center gap-1 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Xóa ảnh thử</span>
-                    </button>
-                  )}
+              {/* Direct QR Display */}
+              <div className="rounded-2xl border border-[#ECEEF5] bg-[#F8F9FD]/60 p-5 flex flex-col items-center text-center space-y-2.5">
+                <div className="bg-white p-3 rounded-2xl border border-[#ECEEF5] shadow-xs">
+                  <img
+                    src={activeQrImage}
+                    alt="Mã QR thanh toán học phí VietQR"
+                    className="w-56 h-56 object-contain rounded-xl"
+                  />
+                </div>
+                <div className="text-xs font-medium text-[#555C75]">
+                  Mã QR thanh toán chính thức · VietQR / Napas 247
                 </div>
               </div>
 

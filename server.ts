@@ -39,6 +39,7 @@ import {
   AssessmentWeightsConfig,
   calculateStudentAcademicSummary,
   CompletionStatus,
+  DEFAULT_TUITION_CONFIG,
   computeWeightedNumericGrade,
   GradeApprovalRecord,
   GradeSubmissionRecord,
@@ -52,6 +53,7 @@ import {
   TuitionPaymentRecord,
   UserRole,
   buildTuitionTransferNote,
+  isValidIsoDateYmd,
   validateCourseCredit,
   validateScoreOnTenScale,
 } from './shared/academicLogic.ts';
@@ -2909,6 +2911,7 @@ app.put(
 
 const MAX_QR_DATA_URL_CHARS = 3_500_000;
 const QR_DATA_URL_REGEX = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i;
+const LOCAL_QR_ASSET_REGEX = /^\/assets\/[A-Za-z0-9_/-]+\.(png|jpe?g|webp|gif)$/i;
 
 app.get(
   '/api/students/:studentId/tuition',
@@ -3060,6 +3063,24 @@ app.put(
       return;
     }
 
+    const nextDueDate =
+      body.paymentDueDate !== undefined ? body.paymentDueDate.trim() : current.paymentDueDate;
+    if (!isValidIsoDateYmd(nextDueDate)) {
+      res.status(400).json({
+        error: 'Ngày đến hạn thanh toán phải có định dạng hợp lệ YYYY-MM-DD.',
+      });
+      return;
+    }
+
+    const nextReminderDays =
+      body.dueReminderDays !== undefined ? Number(body.dueReminderDays) : current.dueReminderDays;
+    if (!Number.isInteger(nextReminderDays) || nextReminderDays < 1 || nextReminderDays > 180) {
+      res.status(400).json({
+        error: 'Số ngày nhắc trước hạn phải là số nguyên từ 1 đến 180 ngày.',
+      });
+      return;
+    }
+
     const nextBankName = (body.bankName ?? current.bankName).trim();
     const nextAccountNumber = (body.accountNumber ?? current.accountNumber).trim();
     const nextAccountHolder = (body.accountHolder ?? current.accountHolder).trim();
@@ -3078,7 +3099,7 @@ app.put(
     let nextQrImage: string | null = current.qrImageDataUrl;
     if (body.qrImageDataUrl !== undefined) {
       if (body.qrImageDataUrl === null || body.qrImageDataUrl === '') {
-        nextQrImage = null;
+        nextQrImage = DEFAULT_TUITION_CONFIG.qrImageDataUrl;
       } else if (typeof body.qrImageDataUrl === 'string') {
         const trimmed = body.qrImageDataUrl.trim();
         if (trimmed.length > MAX_QR_DATA_URL_CHARS) {
@@ -3087,7 +3108,7 @@ app.put(
           });
           return;
         }
-        if (!QR_DATA_URL_REGEX.test(trimmed)) {
+        if (!QR_DATA_URL_REGEX.test(trimmed) && !LOCAL_QR_ASSET_REGEX.test(trimmed)) {
           res.status(400).json({
             error: 'Định dạng ảnh mã QR không hợp lệ. Chỉ chấp nhận PNG, JPG, WEBP hoặc GIF.',
           });
@@ -3104,6 +3125,8 @@ app.put(
     const updatedConfig: TuitionConfig = {
       pricePerCredit: nextPrice,
       debtAlertThreshold: nextDebtThreshold,
+      paymentDueDate: nextDueDate,
+      dueReminderDays: nextReminderDays,
       bankName: nextBankName,
       accountNumber: nextAccountNumber,
       accountHolder: nextAccountHolder,

@@ -1355,6 +1355,8 @@ export function evaluateStudentWarnings(
 export interface TuitionConfig {
   pricePerCredit: number;
   debtAlertThreshold: number;
+  paymentDueDate: string;
+  dueReminderDays: number;
   bankName: string;
   accountNumber: string;
   accountHolder: string;
@@ -1366,11 +1368,13 @@ export interface TuitionConfig {
 export const DEFAULT_TUITION_CONFIG: TuitionConfig = {
   pricePerCredit: 850000,
   debtAlertThreshold: 5000000,
-  bankName: 'Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)',
+  paymentDueDate: '2026-11-25',
+  dueReminderDays: 14,
+  bankName: 'Ngân hàng TMCP Kỹ Thương Việt Nam (Techcombank)',
   accountNumber: '1029384756',
   accountHolder: 'TRƯỜNG ĐẠI HỌC UNIPORTAL',
   transferNotePrefix: 'HOCPHI',
-  qrImageDataUrl: null,
+  qrImageDataUrl: '/assets/aistudio/image_901c93aa.png',
 };
 
 export type TuitionPaymentStatus = 'PAID' | 'PENDING_CONFIRMATION';
@@ -1522,4 +1526,65 @@ export function buildStudentTuitionInvoices(
     };
   });
 }
+
+export interface TuitionDueSummary {
+  semester: string;
+  academic_year: string;
+  amount: number;
+  dueDate: string;
+  daysRemaining: number;
+  isDueSoon: boolean;
+  isOverdue: boolean;
+}
+
+export function isValidIsoDateYmd(value: string | null | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+export function formatDisplayDate(isoDate: string): string {
+  if (!isValidIsoDateYmd(isoDate)) return isoDate;
+  const [y, m, d] = isoDate.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+export function computeTuitionDueSummary(
+  invoices: StudentTuitionInvoice[],
+  config: TuitionConfig,
+  todayIsoDate: string = new Date().toISOString().slice(0, 10)
+): TuitionDueSummary | null {
+  const unpaid = invoices.find((inv) => inv.status === 'UNPAID' && inv.totalAmount > 0);
+  if (!unpaid) return null;
+
+  const dueDate = isValidIsoDateYmd(config.paymentDueDate)
+    ? config.paymentDueDate
+    : DEFAULT_TUITION_CONFIG.paymentDueDate;
+
+  const [dy, dm, dd] = dueDate.split('-').map(Number);
+  const [ty, tm, td] = todayIsoDate.split('-').map(Number);
+  const dueUtc = Date.UTC(dy, dm - 1, dd);
+  const todayUtc = Date.UTC(ty, tm - 1, td);
+  const daysRemaining = Math.round((dueUtc - todayUtc) / 86_400_000);
+  const reminderWindow =
+    Number.isInteger(config.dueReminderDays) && config.dueReminderDays >= 1
+      ? config.dueReminderDays
+      : DEFAULT_TUITION_CONFIG.dueReminderDays;
+
+  return {
+    semester: unpaid.semester,
+    academic_year: unpaid.academic_year,
+    amount: unpaid.totalAmount,
+    dueDate,
+    daysRemaining,
+    isOverdue: daysRemaining < 0,
+    isDueSoon: daysRemaining >= 0 && daysRemaining <= reminderWindow,
+  };
+}
+
 

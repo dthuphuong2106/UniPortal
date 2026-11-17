@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   BookCheck,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   Clock,
@@ -27,6 +28,7 @@ import {
 import {
   buildTargetGpaScenarios,
   calculateTargetGpaPlan,
+  formatDisplayDate,
   formatGpa,
   formatVnd,
   translateSeverity,
@@ -62,7 +64,8 @@ export function StudentDashboardPage({
   const firstName = student.full_name.trim().split(' ').slice(-1)[0] || student.full_name;
   const [yearFilter, setYearFilter] = useState<string>('ALL');
   const [debtBannerDismissed, setDebtBannerDismissed] = useState(false);
-  const notifiedDebtKeyRef = useRef<string | null>(null);
+  const [dueBannerDismissed, setDueBannerDismissed] = useState(false);
+  const notifiedTuitionKeyRef = useRef<string | null>(null);
 
   const isDebtOverThreshold = Boolean(
     tuitionSummary &&
@@ -70,18 +73,57 @@ export function StudentDashboardPage({
       tuitionSummary.totalUnpaid > 0
   );
 
+  const nextDue = tuitionSummary?.nextUnpaidDue ?? null;
+  const shouldShowDueReminder = Boolean(nextDue && (nextDue.isDueSoon || nextDue.isOverdue));
+
   useEffect(() => {
-    if (!tuitionSummary || !isDebtOverThreshold || !onToast) return;
-    const key = `${student.student_id}:${tuitionSummary.totalUnpaid}:${tuitionSummary.debtAlertThreshold}`;
-    if (notifiedDebtKeyRef.current === key) return;
-    notifiedDebtKeyRef.current = key;
-    onToast(
-      `Cảnh báo công nợ học phí: Dư nợ ${formatVnd(tuitionSummary.totalUnpaid)} đã vượt ngưỡng ${formatVnd(tuitionSummary.debtAlertThreshold)}. Vui lòng thanh toán QR.`,
-      'warning'
-    );
+    if (!tuitionSummary || !onToast) return;
+    if (!isDebtOverThreshold && !shouldShowDueReminder) return;
+
+    const key = [
+      student.student_id,
+      tuitionSummary.totalUnpaid,
+      tuitionSummary.debtAlertThreshold,
+      nextDue?.dueDate ?? '',
+      nextDue?.daysRemaining ?? '',
+    ].join(':');
+
+    if (notifiedTuitionKeyRef.current === key) return;
+    notifiedTuitionKeyRef.current = key;
+
+    if (shouldShowDueReminder && nextDue) {
+      const dueStr = formatDisplayDate(nextDue.dueDate);
+      const timingText = nextDue.isOverdue
+        ? `đã quá hạn ${Math.abs(nextDue.daysRemaining)} ngày`
+        : nextDue.daysRemaining === 0
+          ? 'đến hạn hôm nay'
+          : `còn ${nextDue.daysRemaining} ngày`;
+
+      if (isDebtOverThreshold) {
+        onToast(
+          `Nhắc nhở học phí (${nextDue.semester}): Dư nợ ${formatVnd(tuitionSummary.totalUnpaid)} vượt ngưỡng & ${timingText} (hạn ${dueStr}).`,
+          nextDue.isOverdue ? 'error' : 'warning'
+        );
+      } else {
+        onToast(
+          `Nhắc nhở hạn nộp học phí ${nextDue.semester} (${nextDue.academic_year}): ${timingText} (hạn ${dueStr}) — ${formatVnd(nextDue.amount)}.`,
+          nextDue.isOverdue ? 'error' : 'warning'
+        );
+      }
+      return;
+    }
+
+    if (isDebtOverThreshold) {
+      onToast(
+        `Cảnh báo công nợ học phí: Dư nợ ${formatVnd(tuitionSummary.totalUnpaid)} đã vượt ngưỡng ${formatVnd(tuitionSummary.debtAlertThreshold)}. Vui lòng thanh toán QR.`,
+        'warning'
+      );
+    }
   }, [
     isDebtOverThreshold,
+    nextDue,
     onToast,
+    shouldShowDueReminder,
     student.student_id,
     tuitionSummary,
   ]);
@@ -344,6 +386,97 @@ export function StudentDashboardPage({
               onClick={() => setDebtBannerDismissed(true)}
               className="p-2 text-[#9A5F0D] hover:bg-[#F5AE48]/20 rounded-xl transition-colors"
               aria-label="Đóng cảnh báo học phí"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Nhắc nhở ngày đến hạn thanh toán học phí sắp tới */}
+      {shouldShowDueReminder && nextDue && !dueBannerDismissed && (
+        <div
+          role="region"
+          aria-label="Nhắc nhở ngày đến hạn thanh toán học phí"
+          className={`rounded-[18px] border p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 ${
+            nextDue.isOverdue
+              ? 'border-[#EF6472]/45 bg-[#FFF4F5]'
+              : 'border-[#8174F7]/35 bg-[#F5F3FF]'
+          }`}
+        >
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                nextDue.isOverdue
+                  ? 'bg-[#EF6472]/15 text-[#C83D4C]'
+                  : 'bg-[#8174F7]/15 text-[#6558E8]'
+              }`}
+            >
+              <CalendarClock className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`text-sm font-bold ${
+                    nextDue.isOverdue ? 'text-[#9F2432]' : 'text-[#20243A]'
+                  }`}
+                >
+                  {nextDue.isOverdue
+                    ? 'Học phí đã quá hạn thanh toán'
+                    : 'Nhắc nhở ngày đến hạn thanh toán học phí sắp tới'}
+                </span>
+                <span
+                  className={`px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full ${
+                    nextDue.isOverdue
+                      ? 'bg-[#EF6472]/15 text-[#C83D4C]'
+                      : nextDue.daysRemaining <= 3
+                        ? 'bg-[#F5AE48]/20 text-[#9A5F0D]'
+                        : 'bg-white text-[#6558E8] border border-[#8174F7]/30'
+                  }`}
+                >
+                  {nextDue.isOverdue
+                    ? `Quá hạn ${Math.abs(nextDue.daysRemaining)} ngày`
+                    : nextDue.daysRemaining === 0
+                      ? 'Hôm nay là hạn cuối'
+                      : `Còn ${nextDue.daysRemaining} ngày`}
+                </span>
+              </div>
+              <p className="text-xs text-[#555C75] mt-1 leading-relaxed">
+                Hóa đơn{' '}
+                <span className="font-semibold text-[#20243A]">
+                  {nextDue.semester} ({nextDue.academic_year})
+                </span>{' '}
+                số tiền{' '}
+                <span className="font-mono font-bold tabular-nums text-[#6558E8]">
+                  {formatVnd(nextDue.amount)}
+                </span>{' '}
+                có hạn nộp vào ngày{' '}
+                <span className="font-mono font-bold tabular-nums text-[#20243A]">
+                  {formatDisplayDate(nextDue.dueDate)}
+                </span>
+                . Vui lòng hoàn tất quét mã QR trước thời hạn trên.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+            <button
+              type="button"
+              onClick={() => onNavigate('student_tuition')}
+              className={`px-4 py-2 text-xs font-semibold text-white rounded-xl inline-flex items-center gap-1.5 transition-colors ${
+                nextDue.isOverdue
+                  ? 'bg-[#C83D4C] hover:bg-[#AE313F]'
+                  : 'bg-[#6558E8] hover:bg-[#5246D4]'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Thanh toán ngay</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDueBannerDismissed(true)}
+              className="p-2 text-[#858BA3] hover:text-[#20243A] hover:bg-white/70 rounded-xl transition-colors"
+              aria-label="Đóng nhắc nhở hạn thanh toán"
             >
               <X className="w-4 h-4" />
             </button>

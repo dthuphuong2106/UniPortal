@@ -1162,6 +1162,51 @@ function ensureTuitionModuleInitialized(): void {
   })();
 }
 
+function ensureDefaultTuitionQrImage(): void {
+  const migrated = db
+    .prepare("SELECT migration_key FROM schema_migrations WHERE migration_key = 'uniportal_default_qr_asset_v1'")
+    .get();
+  if (migrated) return;
+
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    const row = db
+      .prepare("SELECT setting_value FROM academic_settings WHERE setting_name = 'tuition_config'")
+      .get() as { setting_value: string } | undefined;
+
+    if (row) {
+      try {
+        const parsed = JSON.parse(row.setting_value) as Record<string, unknown>;
+        const updated = {
+          ...DEFAULT_TUITION_CONFIG,
+          ...parsed,
+          qrImageDataUrl:
+            typeof parsed.qrImageDataUrl === 'string' && parsed.qrImageDataUrl.length > 0
+              ? parsed.qrImageDataUrl
+              : DEFAULT_TUITION_CONFIG.qrImageDataUrl,
+          bankName:
+            parsed.bankName === 'Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)' ||
+            !parsed.bankName
+              ? DEFAULT_TUITION_CONFIG.bankName
+              : parsed.bankName,
+          updatedAt: now,
+        };
+        db.prepare(
+          "UPDATE academic_settings SET setting_value = ?, updated_at = ? WHERE setting_name = 'tuition_config'"
+        ).run(JSON.stringify(updated), now);
+      } catch {
+        db.prepare(
+          "UPDATE academic_settings SET setting_value = ?, updated_at = ? WHERE setting_name = 'tuition_config'"
+        ).run(JSON.stringify({ ...DEFAULT_TUITION_CONFIG, updatedAt: now }), now);
+      }
+    }
+
+    db.prepare(
+      "INSERT INTO schema_migrations (migration_key, applied_at) VALUES ('uniportal_default_qr_asset_v1', ?)"
+    ).run(now);
+  })();
+}
+
 export function migrateToTenScaleIntegerCreditsAndReports(): void {
   const alreadyMigrated = db
     .prepare("SELECT migration_key FROM schema_migrations WHERE migration_key = 'uniportal_scale10_intcredits_reports_v1'")
@@ -1343,6 +1388,7 @@ export function seedDatabaseIfEmpty(): boolean {
     ensureThreeRoleSystemAndDemoAccounts();
     migrateToTenScaleIntegerCreditsAndReports();
     ensureTuitionModuleInitialized();
+    ensureDefaultTuitionQrImage();
     return false;
   }
 
@@ -1633,6 +1679,7 @@ export function seedDatabaseIfEmpty(): boolean {
   ensureThreeRoleSystemAndDemoAccounts();
   migrateToTenScaleIntegerCreditsAndReports();
   ensureTuitionModuleInitialized();
+  ensureDefaultTuitionQrImage();
 
   const insertActivity = db.prepare(`
     INSERT INTO academic_activities (activity_id, student_id, actor_user_id, activity_type, description, created_at)
